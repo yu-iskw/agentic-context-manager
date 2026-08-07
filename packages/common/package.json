@@ -1,8 +1,8 @@
 {
-  "name": "@typescript-template/common",
-  "version": "1.0.0",
-  "description": "Common utilities and types for the TypeScript template project.",
-  "keywords": [],
+  "name": "@agentic-context-manager/common",
+  "version": "0.1.0",
+  "description": "Core contracts, runtime adapters, and TypeScript SDK for Agentic Context Manager.",
+  "keywords": ["agents", "context", "memory", "mcp"],
   "license": "Apache-2.0",
   "author": "",
   "main": "dist/index.js",
