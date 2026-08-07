@@ -1,19 +1,14 @@
 {
   "$schema": "https://unpkg.com/knip@6/schema.json",
-  "ignoreBinaries": ["grype", "docker"],
-  "ignoreDependencies": ["@types/node", "@vitest/coverage-v8", "prettier"],
+  "ignoreBinaries": ["grype"],
   "workspaces": {
     ".": {
       "entry": [
-        "eslint.config.mjs",
         "stylelint.config.mjs",
-        "vitest.config.ts",
         "apps/api/src/index.ts",
         "apps/worker/src/index.ts",
         "apps/cli/src/index.ts",
         "packages/sdk/src/index.ts",
-        "packages/core/vitest.config.ts",
-        "packages/core/src/index.test.ts",
         "integration/model-stub/server.mjs",
         "integration/tests/e2e.mjs"
       ],
