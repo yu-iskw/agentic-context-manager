@@ -94,6 +94,11 @@ export interface ContextCheckpoint {
 }
 
 export class ValidationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'ValidationError';
+  }
+
   readonly code = 'invalid_request';
 }
 
@@ -117,10 +122,10 @@ function optionalString(value: unknown, field: string): string | undefined {
 
 function optionalBudgetTokens(value: unknown): number | undefined {
   if (value === undefined) return undefined;
-  if (!Number.isInteger(value) || (value as number) < 64 || (value as number) > 32_000) {
+  if (typeof value !== 'number' || !Number.isInteger(value) || value < 64 || value > 32_000) {
     throw new ValidationError('budgetTokens must be an integer between 64 and 32000');
   }
-  return value as number;
+  return value;
 }
 
 export function parseStartSessionRequest(value: unknown): StartSessionRequest {
