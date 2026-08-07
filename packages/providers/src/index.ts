@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+
 import type { JsonValue } from '../../contracts/src/index.js';
 
 export interface ExtractedMemory {
@@ -25,7 +26,7 @@ function eventText(content: JsonValue): string {
 
 export function deterministicEmbedding(text: string): number[] {
   const digest = createHash('sha256').update(text.trim().toLowerCase()).digest();
-  const values = Array.from({ length: 8 }, (_unused, index) => (digest[index] ?? 0) / 127.5 - 1);
+  const values = Array.from({ length: 8 }, (_unused, index) => (digest.at(index) ?? 0) / 127.5 - 1);
   const norm = Math.sqrt(values.reduce((total, value) => total + value * value, 0)) || 1;
   return values.map((value) => value / norm);
 }
