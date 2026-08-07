@@ -1,9 +1,17 @@
 import { randomUUID } from 'node:crypto';
 
-import { PsqlClient, sqlJson, sqlNullableText, sqlNumber, sqlText, sqlUuid, sqlVector } from '../../../packages/db/src/psql.js';
+import {
+  PsqlClient,
+  sqlJson,
+  sqlNullableText,
+  sqlNumber,
+  sqlText,
+  sqlUuid,
+  sqlVector,
+} from '../../../packages/db/src/psql.js';
 import { createProviderFromEnvironment } from '../../../packages/providers/src/index.js';
 
-import type { JsonValue } from '../../../packages/contracts/src/index.js';
+import type { EventKind, JsonValue } from '../../../packages/contracts/src/index.js';
 import type { ContextProvider } from '../../../packages/providers/src/index.js';
 
 const DEFAULT_TENANT_ID = '00000000-0000-4000-8000-000000000001';
@@ -16,6 +24,7 @@ interface ClaimedIngestion {
 
 interface EventRow {
   eventId: string;
+  kind: EventKind;
   content: JsonValue;
   workspaceId: string;
   taskExternalId: string | null;
@@ -63,6 +72,7 @@ async function loadEvent(eventId: string): Promise<EventRow> {
   const rows = await db.rows<EventRow>(`
     SELECT
       e.id::text AS "eventId",
+      e.kind,
       e.content,
       s.workspace_id::text AS "workspaceId",
       s.task_external_id AS "taskExternalId",
@@ -76,6 +86,13 @@ async function loadEvent(eventId: string): Promise<EventRow> {
   return row;
 }
 
+function memoryCategory(eventKind: EventKind, extractedCategory: string): string {
+  if (eventKind === 'decision') return 'decision';
+  if (eventKind === 'handoff') return 'handoff';
+  if (eventKind === 'test_result') return 'test-result';
+  return extractedCategory;
+}
+
 async function processJob(job: ClaimedIngestion, contextProvider: ContextProvider): Promise<void> {
   const event = await loadEvent(job.eventId);
   const memories = await contextProvider.extract(event.content);
@@ -84,6 +101,7 @@ async function processJob(job: ClaimedIngestion, contextProvider: ContextProvide
     const [embedding] = await contextProvider.embed([memory.retrievalText]);
     if (embedding === undefined) throw new Error('embedding provider returned no vector');
     const memoryId = randomUUID();
+    const category = memoryCategory(event.kind, memory.category);
     await db.execute(`
       BEGIN;
       INSERT INTO memory_items (
@@ -92,13 +110,14 @@ async function processJob(job: ClaimedIngestion, contextProvider: ContextProvide
         extractor_id, source_event_id, status
       ) VALUES (
         ${sqlUuid(memoryId)}, ${sqlUuid(tenantId)}, ${sqlUuid(event.workspaceId)},
-        ${sqlNullableText(event.taskExternalId)}, NULL, ${sqlText(memory.category)},
+        ${sqlNullableText(event.taskExternalId)}, NULL, ${sqlText(category)},
         ${sqlJson(memory.structuredValue)}, ${sqlText(memory.retrievalText)}, ${sqlVector(embedding)},
-        ${sqlNumber(memory.confidence)}, ${sqlText('coding-agent-default-v1')}, ${sqlText(memory.extractorId)},
-        ${sqlUuid(event.eventId)}, 'active'
+        ${sqlNumber(memory.confidence)}, ${sqlText('coding-agent-default-v1')},
+        ${sqlText(memory.extractorId)}, ${sqlUuid(event.eventId)}, 'active'
       )
       ON CONFLICT (source_event_id, extractor_id)
       DO UPDATE SET
+        category = EXCLUDED.category,
         structured_value = EXCLUDED.structured_value,
         retrieval_text = EXCLUDED.retrieval_text,
         embedding = EXCLUDED.embedding,
@@ -134,13 +153,15 @@ async function failJob(job: ClaimedIngestion, error: unknown): Promise<void> {
       next_attempt_at = ${retry ? `now() + interval '${Math.min(30, 2 ** job.attempts)} seconds'` : 'now()'}
     WHERE id = ${sqlUuid(job.ingestionId)}
   `);
-  console.error(JSON.stringify({
-    level: 'error',
-    message: 'ingestion failed',
-    ingestionId: job.ingestionId,
-    attempts: job.attempts,
-    retry,
-  }));
+  console.error(
+    JSON.stringify({
+      level: 'error',
+      message: 'ingestion failed',
+      ingestionId: job.ingestionId,
+      attempts: job.attempts,
+      retry,
+    }),
+  );
 }
 
 async function sleep(milliseconds: number): Promise<void> {
