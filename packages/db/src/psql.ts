@@ -30,6 +30,11 @@ export function sqlTimestamp(value: string): string {
   return `${encodedText(value)}::timestamptz`;
 }
 
+export function sqlNumber(value: number): string {
+  if (!Number.isFinite(value)) throw new Error('SQL number must be finite');
+  return String(value);
+}
+
 export function sqlVector(values: readonly number[]): string {
   if (values.length === 0 || values.some((value) => !Number.isFinite(value))) {
     throw new Error('vector must contain finite numbers');
@@ -50,7 +55,10 @@ async function runPsql(
   const env: Record<string, string | undefined> = { ...process.env };
   if (tenantId !== undefined) env.PGOPTIONS = `-c acm.tenant_id=${tenantId}`;
 
-  return await new Promise<string>((resolve, reject) => {
+  return new Promise<string>((resolve, reject) => {
+    // The executable is a fixed constant and every dynamic SQL scalar is encoded by
+    // the helpers above. Process isolation is the deliberate bootstrap DB boundary.
+    // eslint-disable-next-line security/detect-child-process
     const child = spawn('psql', args, { env, stdio: ['ignore', 'pipe', 'pipe'] });
     let stdout = '';
     let stderr = '';
