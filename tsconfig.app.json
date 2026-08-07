@@ -18,7 +18,8 @@
     "packages/contracts/**/*.ts",
     "packages/core/**/*.ts",
     "packages/db/**/*.ts",
-    "packages/providers/**/*.ts"
+    "packages/providers/**/*.ts",
+    "packages/sdk/**/*.ts"
   ],
   "exclude": [
     "**/*.test.ts",
