@@ -1,6 +1,6 @@
 # Agentic Context Manager
 
-Agentic Context Manager (ACM) is a vendor-neutral context lifecycle service for long-running applications and coding agents. It is inspired by the lifecycle model in *Agentic Context Management: Solving Agent Memory and Cost by Treating Them as Lifecycle and Architecture Problems* while defining independently implementable contracts rather than attempting to reproduce undisclosed mechanisms.
+Agentic Context Manager (ACM) is a vendor-neutral context lifecycle service for long-running applications and coding agents. It is inspired by the lifecycle model in _Agentic Context Management: Solving Agent Memory and Cost by Treating Them as Lifecycle and Architecture Problems_ while defining independently implementable contracts rather than attempting to reproduce undisclosed mechanisms.
 
 ## Status
 
@@ -17,18 +17,20 @@ Implemented:
 - authorization/scope filtering before ranking;
 - hard token-budget context packing;
 - a recent-event read-your-writes overlay while asynchronous extraction is pending;
+- validated extractive checkpoints that fail closed when required memories cannot fit;
 - REST endpoints and a minimal stateless MCP JSON-RPC surface;
+- a first-party TypeScript SDK client;
 - a portable Agent Plugin with context-management skills;
 - deterministic providers for tests; and
 - Docker Compose as the normative local integration-test environment.
 
 Planned after the vertical slice is validated:
 
-- validated compaction/checkpoints;
+- semantic/model-assisted compaction beyond the validated extractive baseline;
 - architecture lifecycle APIs and evaluation gates;
 - anticipation/prefetch;
 - production OIDC/OAuth identity and policy enforcement;
-- first-party TypeScript/Python SDK middleware;
+- Python SDK middleware and deterministic application lifecycle middleware;
 - full MCP SDK integration and protocol conformance testing;
 - native coding-agent hooks/wrappers where lifecycle APIs exist; and
 - specialized queue/vector/graph infrastructure only when measurements justify it.
@@ -46,6 +48,7 @@ Applications / coding agents
 PostgreSQL   read-your-writes overlay
   |   |
   |   +-- pgvector + pg_trgm retrieval
+  |   +-- validated checkpoints
   |
  durable ingestion state
   |
@@ -83,7 +86,7 @@ pnpm lint
 
 ## Local Stack
 
-Start PostgreSQL, run the one-shot migration, and launch the API and worker:
+Start PostgreSQL, run the one-shot migrations, and launch the API and worker:
 
 ```bash
 docker compose up --build
@@ -107,7 +110,21 @@ curl --fail-with-body \
   http://127.0.0.1:8080/v1/sessions
 ```
 
-Use the returned `contextHandle` when recording events and querying context.
+Use the returned `contextHandle` when recording events, querying context, and creating checkpoints.
+
+## Validated Checkpoints
+
+The current checkpoint implementation is intentionally conservative. It is **validated extractive compaction**, not a claim of universally lossless semantic summarization.
+
+Before creating a checkpoint:
+
+1. all asynchronous ingestions for the session must have completed;
+2. active memories are loaded through the same authorized workspace/task/session scope rules used by retrieval;
+3. `decision`, `requirement`, and `unresolved-question` memories are treated as must-preserve items;
+4. exact memory text is packed under the requested token budget; and
+5. checkpoint creation is rejected if every must-preserve item cannot fit.
+
+The original raw events and memory provenance remain durable independently of the checkpoint.
 
 ## Docker Compose Integration Tests
 
@@ -122,7 +139,7 @@ The command builds and starts an isolated stack containing:
 ```text
 PostgreSQL
     |
- one-shot migration
+ one-shot migrations
     |
  +----------+
  |          |
@@ -143,9 +160,11 @@ The integration suite validates:
 - read-your-writes behavior before extraction finishes;
 - worker materialization and provenance;
 - token-budgeted hybrid recall;
+- validated checkpoint creation and must-preserve coverage;
 - invalid context-handle rejection;
-- MCP tool discovery; and
-- MCP recall through the same application service.
+- MCP tool discovery;
+- MCP recall; and
+- MCP checkpoint creation through the same application service.
 
 The test stack uses a temporary PostgreSQL filesystem and removes host port mappings so it is safe to run independently from the developer stack. GitHub Actions runs the same `pnpm test:integration:compose` command.
 
@@ -153,44 +172,60 @@ The test stack uses a temporary PostgreSQL filesystem and removes host port mapp
 
 Current REST endpoints:
 
-| Method | Path | Purpose |
-| --- | --- | --- |
-| `GET` | `/health/live` | Process liveness |
-| `GET` | `/health/ready` | Service readiness |
-| `POST` | `/v1/sessions` | Start an explicit ACM context |
-| `POST` | `/v1/events` | Durably accept an event for asynchronous ingestion |
-| `GET` | `/v1/ingestions/:id` | Read ingestion state |
-| `POST` | `/v1/context/query` | Build a scoped, budgeted context pack |
-| `POST` | `/mcp` | Initial stateless MCP JSON-RPC surface |
+| Method | Path                     | Purpose                                              |
+| ------ | ------------------------ | ---------------------------------------------------- |
+| `GET`  | `/health/live`           | Process liveness                                     |
+| `GET`  | `/health/ready`          | Database- and tenant-scoped service readiness        |
+| `POST` | `/v1/sessions`           | Start an explicit ACM context                        |
+| `POST` | `/v1/events`             | Durably accept an event for asynchronous ingestion   |
+| `GET`  | `/v1/ingestions/:id`     | Read ingestion state                                 |
+| `POST` | `/v1/context/query`       | Build a scoped, budgeted context pack                |
+| `POST` | `/v1/context/checkpoint`  | Create a validated extractive checkpoint             |
+| `POST` | `/mcp`                   | Initial stateless MCP JSON-RPC surface               |
 
 Current MCP tools:
 
 - `acm.session.start`
 - `acm.event.record`
 - `acm.context.recall`
+- `acm.context.checkpoint`
 
 The MCP endpoint is an intentionally small vertical-slice implementation. Full MCP TypeScript SDK integration and compatibility/conformance testing across major clients remain roadmap work.
+
+## TypeScript SDK
+
+`packages/sdk` exposes an `AcmClient` for the current REST lifecycle:
+
+- `startSession`
+- `recordEvent`
+- `ingestionStatus`
+- `waitForIngestion`
+- `queryContext`
+- `checkpointContext`
+
+Application middleware that deterministically wraps every model call remains future work; the current SDK is the transport client foundation for that integration tier.
 
 ## Project Structure
 
 ```text
 apps/
-  api/                 HTTP + MCP adapter
-  cli/                 migrations and health checks
-  worker/              asynchronous ingestion worker
+  api/                   HTTP + MCP adapter
+  cli/                   migrations and health checks
+  worker/                asynchronous ingestion worker
 packages/
-  contracts/           public request/response contracts
-  core/                context ranking and packing logic
-  db/                  persistence adapter
-  providers/           extraction/embedding provider abstractions
-  common/              existing shared-template package
-agent-plugin/           portable Agent Plugin assets
-db/migrations/          PostgreSQL schema, indexes, and RLS
+  contracts/             public request/response contracts
+  core/                  context ranking, packing, and checkpoint validation
+  db/                    persistence adapter
+  providers/             extraction/embedding provider abstractions
+  sdk/                   TypeScript API client
+  common/                existing shared-template package
+agent-plugin/             portable Agent Plugin assets
+db/migrations/            PostgreSQL schema, indexes, RLS, and checkpoints
 integration/
-  model-stub/           deterministic delayed provider
-  tests/                end-to-end Compose tests
-compose.yaml             local development topology
-compose.integration.yaml isolated integration-test override
+  model-stub/             deterministic delayed provider
+  tests/                  end-to-end Compose tests
+compose.yaml              local development topology
+compose.integration.yaml  isolated integration-test override
 ```
 
 ### Bootstrap database adapter
@@ -204,7 +239,7 @@ The initial implementation establishes structural controls but is **not producti
 - tenant identity is passed into PostgreSQL through a connection-scoped setting;
 - RLS applies tenant filtering at the database boundary;
 - context handles are validated against the configured principal;
-- retrieval filters authorization/scope before ranking;
+- retrieval and checkpoint creation filter authorization/scope before using memory;
 - raw events remain provenance anchors for derived memory;
 - plugin guidance treats recalled content as untrusted historical data; and
 - local database authentication is intentionally development-only.
