@@ -3,11 +3,12 @@
   "ignoreBinaries": ["grype"],
   "workspaces": {
     ".": {
-      "entry": ["stylelint.config.mjs"],
+      "entry": ["stylelint.config.mjs", "integration/tests/e2e.mjs"],
       "project": ["**/*.{js,cjs,mjs,ts,cts,mts}", "!packages/**", "!.trunk/**", "!node_modules/**"]
     },
     "packages/*": {
-      "project": ["src/**/*.ts"]
+      "entry": ["src/index.ts", "src/runtime/api-server.js", "src/runtime/worker.js"],
+      "project": ["src/**/*.{ts,js}"]
     }
   }
 }
