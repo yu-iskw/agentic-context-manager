@@ -1,12 +1,12 @@
 services:
   postgres:
-    ports: []
-    volumes: []
-    tmpfs:
-      - /var/lib/postgresql/data
+    ports: !reset []
+    volumes:
+      - type: tmpfs
+        target: /var/lib/postgresql/data
 
   api:
-    ports: []
+    ports: !reset []
     environment:
       ACM_PROVIDER_MODE: http
       ACM_PROVIDER_BASE_URL: http://model-stub:9090
