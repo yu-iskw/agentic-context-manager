@@ -4,7 +4,12 @@
   "private": true,
   "type": "module",
   "description": "Lifecycle-based context management for applications and coding agents.",
-  "keywords": ["agent", "context", "memory", "mcp"],
+  "keywords": [
+    "agent",
+    "context",
+    "memory",
+    "mcp"
+  ],
   "license": "Apache-2.0",
   "author": "",
   "scripts": {
