@@ -24,18 +24,23 @@ async function waitForIngestion(ingestionId) {
   assert.fail('ingestion did not complete before timeout');
 }
 
+async function createSession() {
+  const result = await jsonRequest(`${baseUrl}/v1/sessions`, {
+    method: 'POST',
+    body: JSON.stringify({
+      workspace: { externalId: 'github:yu-iskw/agentic-context-manager' },
+      task: { externalId: 'integration-test' },
+      agent: { name: 'integration-runner' },
+    }),
+  });
+  assert.equal(result.response.status, 201);
+  assert.match(result.body.contextHandle, /^[0-9a-f-]{36}$/);
+  return result.body;
+}
+
 console.log('integration: create session');
-const sessionResult = await jsonRequest(`${baseUrl}/v1/sessions`, {
-  method: 'POST',
-  body: JSON.stringify({
-    workspace: { externalId: 'github:yu-iskw/agentic-context-manager' },
-    task: { externalId: 'integration-test' },
-    agent: { name: 'integration-runner' },
-  }),
-});
-assert.equal(sessionResult.response.status, 201);
-assert.match(sessionResult.body.contextHandle, /^[0-9a-f-]{36}$/);
-const contextHandle = sessionResult.body.contextHandle;
+const session = await createSession();
+const contextHandle = session.contextHandle;
 
 const eventPayload = {
   contextHandle,
@@ -81,6 +86,21 @@ assert.ok(
 
 console.log('integration: worker materializes memory');
 await waitForIngestion(firstEvent.body.ingestionId);
+
+console.log('integration: idempotency keys are scoped to a session');
+const secondSession = await createSession();
+const secondEvent = await jsonRequest(`${baseUrl}/v1/events`, {
+  method: 'POST',
+  body: JSON.stringify({
+    ...eventPayload,
+    contextHandle: secondSession.contextHandle,
+    content: { text: 'A separate session may safely reuse the same idempotency key.' },
+  }),
+});
+assert.equal(secondEvent.response.status, 202);
+assert.notEqual(secondEvent.body.eventId, firstEvent.body.eventId);
+assert.notEqual(secondEvent.body.ingestionId, firstEvent.body.ingestionId);
+await waitForIngestion(secondEvent.body.ingestionId);
 
 const recall = await jsonRequest(`${baseUrl}/v1/context/query`, {
   method: 'POST',
