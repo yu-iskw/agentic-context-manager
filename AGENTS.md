@@ -2,13 +2,13 @@
 
 Treat this file as the **canonical** description of how to work in this repository. Tool-specific entrypoints load or import it where supported.
 
-| Surface                     | How this repository consumes shared instructions                                                                                                        |
-| --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Cursor                      | Root `AGENTS.md` is applied automatically.                                                                                                              |
-| OpenAI Codex                | Discovers `AGENTS.md` from the git root toward the working directory.                                                                                    |
-| Claude Code                 | Root `CLAUDE.md` imports `@AGENTS.md`; Claude-only hooks, skills, and agents live under `.claude/`.                                                       |
-| GitHub Copilot coding agent | Uses the nearest `AGENTS.md`; `.github/copilot-instructions.md` may add Copilot-specific guidance.                                                       |
-| Other coding agents         | Prefer this file as the portable project instruction source where the client supports `AGENTS.md`.                                                       |
+| Surface                     | How this repository consumes shared instructions                                                    |
+| --------------------------- | --------------------------------------------------------------------------------------------------- |
+| Cursor                      | Root `AGENTS.md` is applied automatically.                                                          |
+| OpenAI Codex                | Discovers `AGENTS.md` from the git root toward the working directory.                               |
+| Claude Code                 | Root `CLAUDE.md` imports `@AGENTS.md`; Claude-only hooks, skills, and agents live under `.claude/`. |
+| GitHub Copilot coding agent | Uses the nearest `AGENTS.md`; `.github/copilot-instructions.md` may add Copilot-specific guidance.  |
+| Other coding agents         | Prefer this file as the portable project instruction source where the client supports `AGENTS.md`.  |
 
 ## Project overview
 

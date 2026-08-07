@@ -18,9 +18,7 @@ function candidate(overrides: Partial<RankedContextCandidate> = {}): RankedConte
   };
 }
 
-function checkpointCandidate(
-  overrides: Partial<CheckpointCandidate> = {},
-): CheckpointCandidate {
+function checkpointCandidate(overrides: Partial<CheckpointCandidate> = {}): CheckpointCandidate {
   return {
     memoryId: 'memory-1',
     category: 'decision',

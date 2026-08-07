@@ -142,7 +142,11 @@ async function processJob(job: ClaimedIngestion, contextProvider: ContextProvide
   `);
 }
 
-function retrySql(job: ClaimedIngestion): { shouldRetry: boolean; status: string; nextAttempt: string } {
+function retrySql(job: ClaimedIngestion): {
+  shouldRetry: boolean;
+  status: string;
+  nextAttempt: string;
+} {
   const shouldRetry = job.attempts < 3;
   return {
     shouldRetry,

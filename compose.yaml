@@ -55,8 +55,7 @@ services:
       migrate:
         condition: service_completed_successfully
     healthcheck:
-      test:
-        [CMD, node, dist/apps/cli/src/index.js, healthcheck, http://127.0.0.1:8080/health/ready]
+      test: [CMD, node, dist/apps/cli/src/index.js, healthcheck, http://127.0.0.1:8080/health/ready]
       interval: 2s
       timeout: 3s
       retries: 30

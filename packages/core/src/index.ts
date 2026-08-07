@@ -42,9 +42,7 @@ function compareRankedCandidates(
   right: RankedContextCandidate,
 ): number {
   const scoreDifference = right.score - left.score;
-  return scoreDifference === 0
-    ? right.createdAt.localeCompare(left.createdAt)
-    : scoreDifference;
+  return scoreDifference === 0 ? right.createdAt.localeCompare(left.createdAt) : scoreDifference;
 }
 
 function normalizedText(text: string): string {

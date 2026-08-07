@@ -172,16 +172,16 @@ The test stack uses a temporary PostgreSQL filesystem and removes host port mapp
 
 Current REST endpoints:
 
-| Method | Path                     | Purpose                                              |
-| ------ | ------------------------ | ---------------------------------------------------- |
-| `GET`  | `/health/live`           | Process liveness                                     |
-| `GET`  | `/health/ready`          | Database- and tenant-scoped service readiness        |
-| `POST` | `/v1/sessions`           | Start an explicit ACM context                        |
-| `POST` | `/v1/events`             | Durably accept an event for asynchronous ingestion   |
-| `GET`  | `/v1/ingestions/:id`     | Read ingestion state                                 |
-| `POST` | `/v1/context/query`       | Build a scoped, budgeted context pack                |
-| `POST` | `/v1/context/checkpoint`  | Create a validated extractive checkpoint             |
-| `POST` | `/mcp`                   | Initial stateless MCP JSON-RPC surface               |
+| Method | Path                     | Purpose                                            |
+| ------ | ------------------------ | -------------------------------------------------- |
+| `GET`  | `/health/live`           | Process liveness                                   |
+| `GET`  | `/health/ready`          | Database- and tenant-scoped service readiness      |
+| `POST` | `/v1/sessions`           | Start an explicit ACM context                      |
+| `POST` | `/v1/events`             | Durably accept an event for asynchronous ingestion |
+| `GET`  | `/v1/ingestions/:id`     | Read ingestion state                               |
+| `POST` | `/v1/context/query`      | Build a scoped, budgeted context pack              |
+| `POST` | `/v1/context/checkpoint` | Create a validated extractive checkpoint           |
+| `POST` | `/mcp`                   | Initial stateless MCP JSON-RPC surface             |
 
 Current MCP tools:
 

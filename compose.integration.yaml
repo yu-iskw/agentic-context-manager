@@ -27,8 +27,7 @@ services:
       MODEL_STUB_DELAY_MS: 750
     profiles: [test]
     healthcheck:
-      test:
-        [CMD, node, dist/apps/cli/src/index.js, healthcheck, http://127.0.0.1:9090/health]
+      test: [CMD, node, dist/apps/cli/src/index.js, healthcheck, http://127.0.0.1:9090/health]
       interval: 1s
       timeout: 2s
       retries: 30

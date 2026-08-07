@@ -153,12 +153,7 @@ const toolsList = await jsonRequest(mcpUrl, {
 assert.equal(toolsList.response.status, 200);
 assert.deepEqual(
   toolsList.body.result.tools.map((tool) => tool.name),
-  [
-    'acm.session.start',
-    'acm.event.record',
-    'acm.context.recall',
-    'acm.context.checkpoint',
-  ],
+  ['acm.session.start', 'acm.event.record', 'acm.context.recall', 'acm.context.checkpoint'],
 );
 
 console.log('integration: MCP context recall');
