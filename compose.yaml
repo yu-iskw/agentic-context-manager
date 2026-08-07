@@ -1,7 +1,11 @@
 name: agentic-context-manager
 
+# Local development deliberately uses PostgreSQL trust authentication so no example
+# passwords are committed to the repository. The database port is bound to loopback
+# only, and the integration override removes the host port entirely. Production
+# deployments MUST provision real database identities and encrypted credentials.
 x-acm-environment: &acm-environment
-  DATABASE_URL: postgresql://acm_runtime:acm-runtime-local-only@postgres:5432/acm
+  DATABASE_URL: postgresql://acm_runtime@postgres:5432/acm
   ACM_TENANT_ID: 00000000-0000-4000-8000-000000000001
   ACM_PRINCIPAL_ID: 00000000-0000-4000-8000-000000000002
   ACM_PROVIDER_MODE: deterministic
@@ -12,7 +16,7 @@ services:
     environment:
       POSTGRES_DB: acm
       POSTGRES_USER: acm_admin
-      POSTGRES_PASSWORD: acm-admin-local-only
+      POSTGRES_HOST_AUTH_METHOD: trust
     ports:
       - "127.0.0.1:5432:5432"
     volumes:
@@ -30,7 +34,7 @@ services:
       target: runtime
     command: ["node", "dist/apps/cli/src/index.js", "db", "migrate"]
     environment:
-      ACM_ADMIN_DATABASE_URL: postgresql://acm_admin:acm-admin-local-only@postgres:5432/acm
+      ACM_ADMIN_DATABASE_URL: postgresql://acm_admin@postgres:5432/acm
     depends_on:
       postgres:
         condition: service_healthy
