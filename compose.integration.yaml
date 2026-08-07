@@ -3,7 +3,7 @@ services:
     ports: !reset []
     volumes:
       - type: tmpfs
-        target: /var/lib/postgresql/data
+        target: /var/lib/postgresql
 
   api:
     ports: !reset []
