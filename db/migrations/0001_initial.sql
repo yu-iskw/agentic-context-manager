@@ -29,9 +29,10 @@ CREATE TABLE IF NOT EXISTS principals (
 CREATE TABLE IF NOT EXISTS workspaces (
   id uuid PRIMARY KEY,
   tenant_id uuid NOT NULL REFERENCES tenants(id),
+  principal_id uuid NOT NULL REFERENCES principals(id),
   external_id text NOT NULL,
   created_at timestamptz NOT NULL DEFAULT now(),
-  UNIQUE (tenant_id, external_id)
+  UNIQUE (tenant_id, principal_id, external_id)
 );
 
 CREATE TABLE IF NOT EXISTS context_architectures (
@@ -71,7 +72,7 @@ CREATE TABLE IF NOT EXISTS events (
   idempotency_key text,
   content_hash text NOT NULL,
   created_at timestamptz NOT NULL DEFAULT now(),
-  UNIQUE (tenant_id, idempotency_key)
+  UNIQUE (tenant_id, session_id, idempotency_key)
 );
 
 CREATE TABLE IF NOT EXISTS ingestion_status (
@@ -142,6 +143,7 @@ CREATE TABLE IF NOT EXISTS audit_events (
   created_at timestamptz NOT NULL DEFAULT now()
 );
 
+CREATE INDEX IF NOT EXISTS workspaces_principal_idx ON workspaces (tenant_id, principal_id, external_id);
 CREATE INDEX IF NOT EXISTS events_session_time_idx ON events (tenant_id, session_id, occurred_at DESC);
 CREATE INDEX IF NOT EXISTS ingestion_pending_idx ON ingestion_status (tenant_id, status, next_attempt_at, created_at);
 CREATE INDEX IF NOT EXISTS memory_scope_idx ON memory_items (tenant_id, workspace_id, task_external_id, status, created_at DESC);
