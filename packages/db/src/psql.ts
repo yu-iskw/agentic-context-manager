@@ -55,15 +55,15 @@ async function runPsql(
   const env: Record<string, string | undefined> = { ...process.env };
   if (tenantId !== undefined) env.PGOPTIONS = `-c acm.tenant_id=${tenantId}`;
 
-  return new Promise<string>((resolve, reject) => {
+  return await new Promise<string>((resolve, reject) => {
     // `psql` is a fixed executable and dynamic SQL scalars are encoded by the helpers above.
     const child = spawn('psql', args, { env, stdio: ['ignore', 'pipe', 'pipe'] });
     let stdout = '';
     let stderr = '';
-    child.stdout?.on('data', (chunk) => {
+    child.stdout.on('data', (chunk) => {
       stdout += chunk.toString();
     });
-    child.stderr?.on('data', (chunk) => {
+    child.stderr.on('data', (chunk) => {
       stderr += chunk.toString();
     });
     child.on('error', reject);
@@ -84,7 +84,10 @@ export class PsqlClient {
   }
 
   async rows<T>(selectSql: string): Promise<T[]> {
-    const wrapped = `SELECT COALESCE(json_agg(row_to_json(acm_row)), '[]'::json)::text FROM (${selectSql}) AS acm_row`;
+    const wrapped = [
+      "SELECT COALESCE(json_agg(row_to_json(acm_row)), '[]'::json)::text",
+      `FROM (${selectSql}) AS acm_row`,
+    ].join(' ');
     const output = await runPsql(this.#databaseUrl, wrapped, this.#tenantId);
     const value = output.trim();
     if (value === '') return [];
