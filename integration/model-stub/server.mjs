@@ -14,7 +14,12 @@ function embedding(text) {
 
 function textFromContent(content) {
   if (typeof content === 'string') return content;
-  if (content && typeof content === 'object' && !Array.isArray(content) && typeof content.text === 'string') {
+  if (
+    content &&
+    typeof content === 'object' &&
+    !Array.isArray(content) &&
+    typeof content.text === 'string'
+  ) {
     return content.text;
   }
   return JSON.stringify(content);
@@ -52,15 +57,18 @@ createServer(async (request, response) => {
       if (extractionDelayMs > 0) await sleep(extractionDelayMs);
       const text = textFromContent(body.content).trim();
       json(response, 200, {
-        memories: text === ''
-          ? []
-          : [{
-              category: 'observation',
-              retrievalText: text,
-              structuredValue: { text },
-              confidence: 1,
-              extractorId: 'http-test-stub-v1',
-            }],
+        memories:
+          text === ''
+            ? []
+            : [
+                {
+                  category: 'observation',
+                  retrievalText: text,
+                  structuredValue: { text },
+                  confidence: 1,
+                  extractorId: 'http-test-stub-v1',
+                },
+              ],
       });
       return;
     }
