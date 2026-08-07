@@ -134,9 +134,12 @@ class AcmService {
     const contextHandle = randomUUID();
     const rows = await this.#db.rows<{ sessionId: string; contextHandle: string }>(`
       WITH workspace AS (
-        INSERT INTO workspaces (id, tenant_id, external_id)
-        VALUES (${sqlUuid(workspaceId)}, ${sqlUuid(this.#tenantId)}, ${sqlText(request.workspace.externalId)})
-        ON CONFLICT (tenant_id, external_id)
+        INSERT INTO workspaces (id, tenant_id, principal_id, external_id)
+        VALUES (
+          ${sqlUuid(workspaceId)}, ${sqlUuid(this.#tenantId)}, ${sqlUuid(this.#principalId)},
+          ${sqlText(request.workspace.externalId)}
+        )
+        ON CONFLICT (tenant_id, principal_id, external_id)
         DO UPDATE SET external_id = EXCLUDED.external_id
         RETURNING id
       )
@@ -178,7 +181,7 @@ class AcmService {
           ${sqlText(request.kind)}, ${sqlTimestamp(occurredAt)}, ${sqlJson(request.content)},
           ${sqlJson(request.metadata ?? {})}, ${sqlNullableText(idempotencyKey)}, ${sqlText(contentHash(request.content))}
         FROM target_session
-        ON CONFLICT (tenant_id, idempotency_key)
+        ON CONFLICT (tenant_id, session_id, idempotency_key)
         DO UPDATE SET idempotency_key = EXCLUDED.idempotency_key
         RETURNING id
       ), queued AS (
@@ -200,15 +203,17 @@ class AcmService {
   async ingestionStatus(ingestionId: string): Promise<Record<string, JsonValue> | undefined> {
     const rows = await this.#db.rows<Record<string, JsonValue>>(`
       SELECT
-        id::text AS "ingestionId",
-        event_id::text AS "eventId",
-        status,
-        attempts,
-        last_error AS "lastError",
-        created_at::text AS "createdAt",
-        completed_at::text AS "completedAt"
-      FROM ingestion_status
-      WHERE id = ${sqlUuid(ingestionId)}
+        i.id::text AS "ingestionId",
+        i.event_id::text AS "eventId",
+        i.status,
+        i.attempts,
+        i.last_error AS "lastError",
+        i.created_at::text AS "createdAt",
+        i.completed_at::text AS "completedAt"
+      FROM ingestion_status i
+      JOIN events e ON e.id = i.event_id
+      WHERE i.id = ${sqlUuid(ingestionId)}
+        AND e.principal_id = ${sqlUuid(this.#principalId)}
     `);
     return rows[0];
   }
