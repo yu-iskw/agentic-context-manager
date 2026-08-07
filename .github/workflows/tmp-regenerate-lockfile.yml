@@ -30,7 +30,7 @@ jobs:
           node-version-file: .node-version
 
       - name: Repair lockfile from manifests
-        run: pnpm install --lockfile-only --fix-lockfile --no-frozen-lockfile
+        run: pnpm install --lockfile-only --fix-lockfile --no-frozen-lockfile --resolution-mode=highest
 
       - name: Commit repaired lockfile
         run: |
