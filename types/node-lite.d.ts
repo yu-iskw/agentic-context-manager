@@ -3,7 +3,7 @@ declare const process: {
   argv: string[];
   exitCode?: number;
   cwd(): string;
-  on(event: string, listener: (...args: unknown[]) => void): void;
+  on(event: string, listener: () => void): void;
 };
 
 declare class Buffer {
@@ -26,8 +26,8 @@ declare module 'node:child_process' {
     stdio?: readonly string[];
   }
   interface ChildProcess {
-    stdout?: { on(event: 'data', listener: (chunk: Buffer | string) => void): void };
-    stderr?: { on(event: 'data', listener: (chunk: Buffer | string) => void): void };
+    stdout: { on(event: 'data', listener: (chunk: Buffer | string) => void): void };
+    stderr: { on(event: 'data', listener: (chunk: Buffer | string) => void): void };
     on(event: 'error', listener: (error: Error) => void): void;
     on(event: 'close', listener: (code: number | null) => void): void;
   }
