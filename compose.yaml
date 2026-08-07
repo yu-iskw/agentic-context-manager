@@ -1,0 +1,73 @@
+name: agentic-context-manager
+
+x-acm-environment: &acm-environment
+  DATABASE_URL: postgresql://acm_runtime:acm-runtime-local-only@postgres:5432/acm
+  ACM_TENANT_ID: 00000000-0000-4000-8000-000000000001
+  ACM_PRINCIPAL_ID: 00000000-0000-4000-8000-000000000002
+  ACM_PROVIDER_MODE: deterministic
+
+services:
+  postgres:
+    image: pgvector/pgvector:0.8.3-pg18
+    environment:
+      POSTGRES_DB: acm
+      POSTGRES_USER: acm_admin
+      POSTGRES_PASSWORD: acm-admin-local-only
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U acm_admin -d acm"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+      start_period: 5s
+
+  migrate:
+    build:
+      context: .
+      target: runtime
+    command: ["node", "dist/apps/cli/src/index.js", "db", "migrate"]
+    environment:
+      ACM_ADMIN_DATABASE_URL: postgresql://acm_admin:acm-admin-local-only@postgres:5432/acm
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  api:
+    build:
+      context: .
+      target: runtime
+    command: ["node", "dist/apps/api/src/index.js"]
+    environment:
+      <<: *acm-environment
+      ACM_HTTP_HOST: 0.0.0.0
+      ACM_HTTP_PORT: "8080"
+    ports:
+      - "127.0.0.1:8080:8080"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "node", "dist/apps/cli/src/index.js", "healthcheck", "http://127.0.0.1:8080/health/ready"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+      start_period: 3s
+
+  worker:
+    build:
+      context: .
+      target: runtime
+    command: ["node", "dist/apps/worker/src/index.js"]
+    environment:
+      <<: *acm-environment
+      ACM_WORKER_POLL_MS: "200"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+volumes:
+  postgres-data:
