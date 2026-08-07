@@ -1,0 +1,50 @@
+services:
+  postgres:
+    ports: !reset []
+    volumes:
+      - type: tmpfs
+        target: /var/lib/postgresql
+
+  api:
+    ports: !reset []
+    environment:
+      ACM_PROVIDER_MODE: http
+      ACM_PROVIDER_BASE_URL: http://model-stub:9090
+
+  worker:
+    environment:
+      ACM_PROVIDER_MODE: http
+      ACM_PROVIDER_BASE_URL: http://model-stub:9090
+
+  model-stub:
+    build:
+      context: .
+      target: integration-test
+    command: [node, integration/model-stub/server.mjs]
+    environment:
+      MODEL_STUB_HOST: 0.0.0.0
+      MODEL_STUB_PORT: 9090
+      MODEL_STUB_DELAY_MS: 750
+    profiles: [test]
+    healthcheck:
+      test: [CMD, node, dist/apps/cli/src/index.js, healthcheck, http://127.0.0.1:9090/health]
+      interval: 1s
+      timeout: 2s
+      retries: 30
+
+  integration-tests:
+    build:
+      context: .
+      target: integration-test
+    command: [node, integration/tests/e2e.mjs]
+    environment:
+      ACM_BASE_URL: http://api:8080
+      ACM_MCP_URL: http://api:8080/mcp
+    profiles: [test]
+    depends_on:
+      api:
+        condition: service_healthy
+      worker:
+        condition: service_started
+      model-stub:
+        condition: service_healthy

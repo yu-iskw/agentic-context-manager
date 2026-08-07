@@ -1,0 +1,8 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "agentic-context-manager",
+  "version": "0.1.0",
+  "description": "Lifecycle-based context management for applications and coding agents",
+  "license": "Apache-2.0",
+  "keywords": ["context-management", "agent-memory", "mcp", "coding-agent"]
+}

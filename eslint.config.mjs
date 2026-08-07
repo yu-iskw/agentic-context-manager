@@ -1,10 +1,10 @@
+import vitestPlugin from '@vitest/eslint-plugin';
 import tseslint from '@typescript-eslint/eslint-plugin';
 import tsparser from '@typescript-eslint/parser';
 import { flatConfigs as importXFlatConfigs } from 'eslint-plugin-import-x';
-import sonarjs from 'eslint-plugin-sonarjs';
 import security from 'eslint-plugin-security';
+import sonarjs from 'eslint-plugin-sonarjs';
 import unicorn from 'eslint-plugin-unicorn';
-import vitestPlugin from '@vitest/eslint-plugin';
 
 /** @type {import("@typescript-eslint/parser").ParserOptions} */
 const tsParserOptions = {
@@ -18,7 +18,8 @@ const tsParserOptions = {
 const securityRecommended = security.configs.recommended;
 
 /**
- * import-x recommended + typescript resolver (uses `projectService` from parser; eslint-import-resolver-typescript installed for resolution).
+ * import-x recommended + typescript resolver (uses `projectService` from parser;
+ * eslint-import-resolver-typescript is installed for resolution).
  * Prettier stays canonical via Trunk — no @stylistic rules here.
  */
 const importXPlugins = {
@@ -31,7 +32,7 @@ const importXSettings = {
   'import-x/resolver': {
     typescript: {
       alwaysTryTypes: true,
-      project: ['packages/*/tsconfig.json'],
+      project: ['tsconfig.json', 'packages/*/tsconfig.json'],
     },
     node: true,
   },
@@ -73,7 +74,6 @@ const sharedTsRules = Object.assign({}, tseslint.configs['recommended-type-check
   '@typescript-eslint/prefer-promise-reject-errors': 'error',
   '@typescript-eslint/require-array-sort-compare': 'error',
   '@typescript-eslint/member-ordering': 'error',
-  // Security (core + plugin; Trunk still runs Trivy/OSV)
   'no-eval': 'error',
   'no-implied-eval': 'error',
   'no-new-func': 'error',
@@ -82,7 +82,6 @@ const sharedTsRules = Object.assign({}, tseslint.configs['recommended-type-check
   'max-depth': ['error', { max: 6 }],
   'max-params': ['error', { max: 8 }],
   'max-nested-callbacks': ['error', { max: 4 }],
-  // SonarJS
   'sonarjs/cyclomatic-complexity': ['error', { threshold: 20 }],
   'sonarjs/cognitive-complexity': ['error', 20],
   'sonarjs/no-duplicate-string': 'error',
@@ -114,6 +113,16 @@ export default [
     ],
   },
   {
+    files: ['types/**/*.d.ts'],
+    languageOptions: {
+      parser: tsparser,
+      parserOptions: {
+        ecmaVersion: 2022,
+        sourceType: 'module',
+      },
+    },
+  },
+  {
     files: ['packages/**/*.config.ts'],
     ignores: ['**/dist/**'],
     languageOptions: {
@@ -141,7 +150,7 @@ export default [
     },
   },
   {
-    files: ['packages/**/*.ts', 'packages/**/*.tsx'],
+    files: ['apps/**/*.ts', 'packages/**/*.ts', 'packages/**/*.tsx'],
     ignores: ['**/dist/**', '**/*.config.ts', '**/*.test.ts', '**/*.test.tsx'],
     languageOptions: {
       parser: tsparser,
@@ -167,7 +176,7 @@ export default [
     },
   },
   {
-    files: ['packages/**/*.test.ts', 'packages/**/*.test.tsx'],
+    files: ['apps/**/*.test.ts', 'packages/**/*.test.ts', 'packages/**/*.test.tsx'],
     ignores: ['**/dist/**'],
     languageOptions: {
       parser: tsparser,
@@ -191,7 +200,6 @@ export default [
       ...securityRecommended.rules,
       ...sharedTsRules,
       ...vitestPlugin.configs.recommended.rules,
-      // Tests often repeat string literals and use conditional expects; keep signal without noise.
       'vitest/no-conditional-expect': 'off',
       'sonarjs/no-duplicate-string': 'off',
       'max-lines-per-function': ['error', { max: 700 }],
