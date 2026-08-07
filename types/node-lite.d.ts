@@ -9,8 +9,8 @@ declare const process: {
 declare class Buffer {
   static from(input: string, encoding?: string): Buffer;
   toString(encoding?: string): string;
+  at(index: number): number | undefined;
   readonly length: number;
-  readonly [index: number]: number;
 }
 
 declare module 'node:crypto' {
