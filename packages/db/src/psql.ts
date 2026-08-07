@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process';
 
-export interface PsqlClientOptions {
+interface PsqlClientOptions {
   databaseUrl: string;
   tenantId?: string;
 }
