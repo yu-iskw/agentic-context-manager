@@ -19,5 +19,9 @@
     "packages/core/**/*.ts",
     "packages/db/**/*.ts",
     "packages/providers/**/*.ts"
+  ],
+  "exclude": [
+    "**/*.test.ts",
+    "**/*.spec.ts"
   ]
 }
