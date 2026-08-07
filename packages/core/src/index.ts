@@ -11,7 +11,7 @@ export interface CheckpointCandidate {
   createdAt: string;
 }
 
-export interface CheckpointBuildResult {
+interface CheckpointBuildResult {
   status: 'validated' | 'rejected';
   summary: string;
   sourceMemoryIds: string[];
