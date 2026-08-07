@@ -56,9 +56,7 @@ async function runPsql(
   if (tenantId !== undefined) env.PGOPTIONS = `-c acm.tenant_id=${tenantId}`;
 
   return new Promise<string>((resolve, reject) => {
-    // The executable is a fixed constant and every dynamic SQL scalar is encoded by
-    // the helpers above. Process isolation is the deliberate bootstrap DB boundary.
-    // eslint-disable-next-line security/detect-child-process
+    // `psql` is a fixed executable and dynamic SQL scalars are encoded by the helpers above.
     const child = spawn('psql', args, { env, stdio: ['ignore', 'pipe', 'pipe'] });
     let stdout = '';
     let stderr = '';
