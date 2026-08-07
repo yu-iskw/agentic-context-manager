@@ -1,9 +1,9 @@
 {
-  "name": "typescript-template",
-  "version": "1.0.0",
+  "name": "agentic-context-manager",
+  "version": "0.1.0",
   "private": true,
-  "description": "",
-  "keywords": [],
+  "description": "Lifecycle-based context management for applications and coding agents.",
+  "keywords": ["agents", "context", "memory", "mcp"],
   "license": "Apache-2.0",
   "author": "",
   "scripts": {
@@ -26,7 +26,11 @@
     "codeql:local": "bash dev/codeql.sh",
     "test": "vitest run",
     "coverage": "vitest run --coverage",
-    "coverage:watch": "vitest --coverage"
+    "coverage:watch": "vitest --coverage",
+    "compose:deps": "docker compose up -d postgres migrate",
+    "compose:down": "docker compose down -v --remove-orphans",
+    "dev": "docker compose up --build api worker",
+    "test:integration:compose": "bash scripts/test-integration-compose.sh"
   },
   "devDependencies": {
     "@trunkio/launcher": "^1.3.4",
@@ -48,7 +52,7 @@
   },
   "packageManager": "pnpm@11.0.5",
   "engines": {
-    "node": ">=22",
+    "node": ">=24",
     "pnpm": ">=11.0.5"
   }
 }
