@@ -1,4 +1,6 @@
 import type {
+  ContextCheckpoint,
+  ContextCheckpointRequest,
   ContextPack,
   ContextQueryRequest,
   RecordEventRequest,
@@ -58,13 +60,21 @@ export class AcmClient {
   }
 
   async ingestionStatus(ingestionId: string): Promise<IngestionStatus> {
-    return await this.#request<IngestionStatus>(`/v1/ingestions/${encodeURIComponent(ingestionId)}`, {
-      method: 'GET',
-    });
+    return await this.#request<IngestionStatus>(
+      `/v1/ingestions/${encodeURIComponent(ingestionId)}`,
+      { method: 'GET' },
+    );
   }
 
   async queryContext(request: ContextQueryRequest): Promise<ContextPack> {
     return await this.#request<ContextPack>('/v1/context/query', {
+      method: 'POST',
+      body: JSON.stringify(request),
+    });
+  }
+
+  async checkpointContext(request: ContextCheckpointRequest): Promise<ContextCheckpoint> {
+    return await this.#request<ContextCheckpoint>('/v1/context/checkpoint', {
       method: 'POST',
       body: JSON.stringify(request),
     });
