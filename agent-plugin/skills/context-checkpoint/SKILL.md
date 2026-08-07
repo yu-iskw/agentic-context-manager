@@ -1,10 +1,12 @@
 ---
 name: context-checkpoint
-description: Prepare for a durable task checkpoint or handoff at meaningful boundaries.
+description: Create a validated durable checkpoint at meaningful task or handoff boundaries.
 ---
 
 # Checkpoint task context
 
-The initial ACM vertical slice does not yet expose validated compaction as a model-controlled tool. Until that lands, record the key decision, requirement, test result, or unresolved question with `acm.event.record` at meaningful task boundaries instead of dumping every transient token into long-term memory.
+Use `acm.context.checkpoint` after the current session's asynchronous ingestions have completed and before a meaningful handoff, interruption, or context reset.
 
-Prefer explicit `decision`, `test_result`, and `handoff` event kinds when they accurately describe the event.
+The current checkpoint strategy is deliberately conservative: it preserves required lifecycle memories such as decisions, requirements, and unresolved questions verbatim within the requested token budget. If those required memories cannot all fit, checkpoint creation is rejected instead of silently discarding them.
+
+Continue to use `acm.event.record` for durable decisions, requirements, test results, handoffs, and other high-value events before creating the checkpoint.
