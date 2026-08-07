@@ -18,11 +18,11 @@ services:
       POSTGRES_USER: acm_admin
       POSTGRES_HOST_AUTH_METHOD: trust
     ports:
-      - "127.0.0.1:5432:5432"
+      - 127.0.0.1:5432:5432
     volumes:
       - postgres-data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U acm_admin -d acm"]
+      test: [CMD-SHELL, pg_isready -U acm_admin -d acm]
       interval: 2s
       timeout: 3s
       retries: 30
@@ -32,30 +32,31 @@ services:
     build:
       context: .
       target: runtime
-    command: ["node", "dist/apps/cli/src/index.js", "db", "migrate"]
+    command: [node, dist/apps/cli/src/index.js, db, migrate]
     environment:
       ACM_ADMIN_DATABASE_URL: postgresql://acm_admin@postgres:5432/acm
     depends_on:
       postgres:
         condition: service_healthy
-    restart: "no"
+    restart: no
 
   api:
     build:
       context: .
       target: runtime
-    command: ["node", "dist/apps/api/src/index.js"]
+    command: [node, dist/apps/api/src/index.js]
     environment:
       <<: *acm-environment
       ACM_HTTP_HOST: 0.0.0.0
-      ACM_HTTP_PORT: "8080"
+      ACM_HTTP_PORT: 8080
     ports:
-      - "127.0.0.1:8080:8080"
+      - 127.0.0.1:8080:8080
     depends_on:
       migrate:
         condition: service_completed_successfully
     healthcheck:
-      test: ["CMD", "node", "dist/apps/cli/src/index.js", "healthcheck", "http://127.0.0.1:8080/health/ready"]
+      test:
+        [CMD, node, dist/apps/cli/src/index.js, healthcheck, http://127.0.0.1:8080/health/ready]
       interval: 2s
       timeout: 3s
       retries: 30
@@ -65,10 +66,10 @@ services:
     build:
       context: .
       target: runtime
-    command: ["node", "dist/apps/worker/src/index.js"]
+    command: [node, dist/apps/worker/src/index.js]
     environment:
       <<: *acm-environment
-      ACM_WORKER_POLL_MS: "200"
+      ACM_WORKER_POLL_MS: 200
     depends_on:
       migrate:
         condition: service_completed_successfully
