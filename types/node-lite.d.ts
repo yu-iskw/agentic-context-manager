@@ -31,7 +31,11 @@ declare module 'node:child_process' {
     on(event: 'error', listener: (error: Error) => void): void;
     on(event: 'close', listener: (code: number | null) => void): void;
   }
-  export function spawn(command: string, args?: readonly string[], options?: SpawnOptions): ChildProcess;
+  export function spawn(
+    command: string,
+    args?: readonly string[],
+    options?: SpawnOptions,
+  ): ChildProcess;
 }
 
 declare module 'node:http' {
