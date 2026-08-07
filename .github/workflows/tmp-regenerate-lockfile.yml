@@ -30,7 +30,10 @@ jobs:
           node-version-file: .node-version
 
       - name: Repair lockfile from manifests
-        run: pnpm --config.resolution-mode=highest install --lockfile-only --fix-lockfile --no-frozen-lockfile
+        run: |
+          printf '\nresolutionMode: highest\n' >> pnpm-workspace.yaml
+          pnpm install --lockfile-only --fix-lockfile --no-frozen-lockfile
+          git checkout -- pnpm-workspace.yaml
 
       - name: Commit repaired lockfile
         run: |
