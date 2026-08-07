@@ -24,6 +24,14 @@ export interface IngestionStatus {
   completedAt: string | null;
 }
 
+function isTerminalStatus(status: IngestionStatus['status']): boolean {
+  return status === 'completed' || status === 'failed';
+}
+
+async function delay(milliseconds: number): Promise<void> {
+  await new Promise<void>((resolve) => setTimeout(resolve, milliseconds));
+}
+
 export class AcmApiError extends Error {
   readonly status: number;
   readonly body: unknown;
@@ -90,8 +98,8 @@ export class AcmClient {
 
     while (Date.now() < deadline) {
       const status = await this.ingestionStatus(ingestionId);
-      if (status.status === 'completed' || status.status === 'failed') return status;
-      await new Promise<void>((resolve) => setTimeout(resolve, pollIntervalMs));
+      if (isTerminalStatus(status.status)) return status;
+      await delay(pollIntervalMs);
     }
 
     throw new Error(`ACM ingestion ${ingestionId} did not finish within ${timeoutMs} ms`);
