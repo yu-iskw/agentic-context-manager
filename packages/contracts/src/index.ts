@@ -70,6 +70,29 @@ export interface ContextPack {
   createdAt: string;
 }
 
+export interface ContextCheckpointRequest {
+  contextHandle: string;
+  budgetTokens?: number;
+}
+
+export interface ContextCheckpointValidation {
+  mustPreserveCount: number;
+  preservedCount: number;
+  coverage: number;
+}
+
+export interface ContextCheckpoint {
+  id: string;
+  sessionId: string;
+  status: 'validated';
+  budgetTokens: number;
+  usedTokens: number;
+  summary: string;
+  sourceMemoryIds: string[];
+  validation: ContextCheckpointValidation;
+  createdAt: string;
+}
+
 export class ValidationError extends Error {
   readonly code = 'invalid_request';
 }
@@ -92,6 +115,14 @@ function optionalString(value: unknown, field: string): string | undefined {
   return value === undefined ? undefined : stringValue(value, field);
 }
 
+function optionalBudgetTokens(value: unknown): number | undefined {
+  if (value === undefined) return undefined;
+  if (!Number.isInteger(value) || (value as number) < 64 || (value as number) > 32_000) {
+    throw new ValidationError('budgetTokens must be an integer between 64 and 32000');
+  }
+  return value as number;
+}
+
 export function parseStartSessionRequest(value: unknown): StartSessionRequest {
   const body = objectValue(value);
   const workspace = objectValue(body.workspace, 'workspace');
@@ -100,7 +131,9 @@ export function parseStartSessionRequest(value: unknown): StartSessionRequest {
   const result: StartSessionRequest = {
     workspace: { externalId: stringValue(workspace.externalId, 'workspace.externalId') },
   };
-  if (task !== undefined) result.task = { externalId: stringValue(task.externalId, 'task.externalId') };
+  if (task !== undefined) {
+    result.task = { externalId: stringValue(task.externalId, 'task.externalId') };
+  }
   if (agent !== undefined) result.agent = { name: stringValue(agent.name, 'agent.name') };
   return result;
 }
@@ -145,18 +178,28 @@ export function parseContextQueryRequest(value: unknown): ContextQueryRequest {
     query: stringValue(body.query, 'query'),
   };
   if (body.mode !== undefined) {
-    if (body.mode !== 'fast' && body.mode !== 'accurate') throw new ValidationError('mode must be fast or accurate');
+    if (body.mode !== 'fast' && body.mode !== 'accurate') {
+      throw new ValidationError('mode must be fast or accurate');
+    }
     result.mode = body.mode;
   }
-  if (body.budgetTokens !== undefined) {
-    if (!Number.isInteger(body.budgetTokens) || (body.budgetTokens as number) < 64 || (body.budgetTokens as number) > 32_000) {
-      throw new ValidationError('budgetTokens must be an integer between 64 and 32000');
-    }
-    result.budgetTokens = body.budgetTokens as number;
-  }
+  const budgetTokens = optionalBudgetTokens(body.budgetTokens);
+  if (budgetTokens !== undefined) result.budgetTokens = budgetTokens;
   if (body.includeExplanations !== undefined) {
-    if (typeof body.includeExplanations !== 'boolean') throw new ValidationError('includeExplanations must be boolean');
+    if (typeof body.includeExplanations !== 'boolean') {
+      throw new ValidationError('includeExplanations must be boolean');
+    }
     result.includeExplanations = body.includeExplanations;
   }
+  return result;
+}
+
+export function parseContextCheckpointRequest(value: unknown): ContextCheckpointRequest {
+  const body = objectValue(value);
+  const result: ContextCheckpointRequest = {
+    contextHandle: stringValue(body.contextHandle, 'contextHandle'),
+  };
+  const budgetTokens = optionalBudgetTokens(body.budgetTokens);
+  if (budgetTokens !== undefined) result.budgetTokens = budgetTokens;
   return result;
 }
