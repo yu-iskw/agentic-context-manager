@@ -1,13 +1,20 @@
 {
-  "name": "typescript-template",
-  "version": "1.0.0",
+  "name": "agentic-context-manager",
+  "version": "0.1.0",
   "private": true,
-  "description": "",
-  "keywords": [],
+  "type": "module",
+  "description": "Lifecycle-based context management for applications and coding agents.",
+  "keywords": ["agent", "context", "memory", "mcp"],
   "license": "Apache-2.0",
   "author": "",
   "scripts": {
-    "build": "pnpm --recursive build",
+    "build": "tsc -p tsconfig.app.json && pnpm --recursive --if-present build",
+    "dev": "pnpm build && node dist/apps/api/src/index.js",
+    "dev:api": "node dist/apps/api/src/index.js",
+    "dev:worker": "node dist/apps/worker/src/index.js",
+    "db:migrate": "node dist/apps/cli/src/index.js db migrate",
+    "compose:deps": "docker compose up -d postgres migrate",
+    "test:integration:compose": "bash dev/test-integration-compose.sh",
     "trunk": "trunk",
     "format": "pnpm format:trunk",
     "format:all": "pnpm format:trunk-all",
@@ -48,7 +55,7 @@
   },
   "packageManager": "pnpm@11.0.5",
   "engines": {
-    "node": ">=22",
+    "node": ">=24.13.0",
     "pnpm": ">=11.0.5"
   }
 }
