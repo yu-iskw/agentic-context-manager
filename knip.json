@@ -8,6 +8,9 @@
         "apps/api/src/index.ts",
         "apps/worker/src/index.ts",
         "apps/cli/src/index.ts",
+        "packages/sdk/src/index.ts",
+        "packages/core/vitest.config.ts",
+        "packages/core/src/index.test.ts",
         "integration/model-stub/server.mjs",
         "integration/tests/e2e.mjs"
       ],
