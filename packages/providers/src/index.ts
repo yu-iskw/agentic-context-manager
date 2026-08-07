@@ -26,16 +26,19 @@ function eventText(content: JsonValue): string {
 
 export function deterministicEmbedding(text: string): number[] {
   const digest = createHash('sha256').update(text.trim().toLowerCase()).digest();
-  const values = Array.from({ length: 8 }, (_unused, index) => (digest.at(index) ?? 0) / 127.5 - 1);
+  const values = Array.from(
+    { length: 8 },
+    (_unused, index) => (digest.at(index) ?? 0) / 127.5 - 1,
+  );
   const norm = Math.sqrt(values.reduce((total, value) => total + value * value, 0)) || 1;
   return values.map((value) => value / norm);
 }
 
 export class DeterministicProvider implements ContextProvider {
-  async extract(content: JsonValue): Promise<readonly ExtractedMemory[]> {
+  extract(content: JsonValue): Promise<readonly ExtractedMemory[]> {
     const text = eventText(content).trim();
-    if (text === '') return [];
-    return [
+    if (text === '') return Promise.resolve([]);
+    return Promise.resolve([
       {
         category: 'observation',
         retrievalText: text,
@@ -43,11 +46,11 @@ export class DeterministicProvider implements ContextProvider {
         confidence: 1,
         extractorId: 'deterministic-v1',
       },
-    ];
+    ]);
   }
 
-  async embed(input: readonly string[]): Promise<readonly number[][]> {
-    return input.map(deterministicEmbedding);
+  embed(input: readonly string[]): Promise<readonly number[][]> {
+    return Promise.resolve(input.map(deterministicEmbedding));
   }
 }
 
@@ -84,7 +87,9 @@ export class HttpTestProvider implements ContextProvider {
 export function createProviderFromEnvironment(): ContextProvider {
   if (process.env.ACM_PROVIDER_MODE === 'http') {
     const baseUrl = process.env.ACM_PROVIDER_BASE_URL;
-    if (baseUrl === undefined) throw new Error('ACM_PROVIDER_BASE_URL is required in http provider mode');
+    if (baseUrl === undefined) {
+      throw new Error('ACM_PROVIDER_BASE_URL is required in http provider mode');
+    }
     return new HttpTestProvider(baseUrl);
   }
   return new DeterministicProvider();
