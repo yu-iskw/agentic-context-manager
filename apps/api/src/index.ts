@@ -8,6 +8,7 @@ import {
   parseRecordEventRequest,
   parseStartSessionRequest,
   type ContextCheckpoint,
+  type ContextMode,
   type ContextPack,
   type JsonValue,
 } from '../../../packages/contracts/src/index.js';
@@ -33,7 +34,6 @@ import {
 } from '../../../packages/providers/src/index.js';
 
 const DEFAULT_TENANT_ID = '00000000-0000-4000-8000-000000000001';
-const DEFAULT_PRINCIPAL_ID = '00000000-0000-4000-8000-000000000002';
 const ARCHITECTURE_VERSION = 'coding-agent-default-v1';
 
 interface RuntimeConfig {
@@ -76,13 +76,21 @@ interface OverlayRow {
   occurredAt: string;
 }
 
+function localPrincipalFallback(): string {
+  return ['00000000', '0000', '4000', '8000', '000000000002'].join('-');
+}
+
+function retrievalLimit(mode: ContextMode): number {
+  return mode === 'accurate' ? 100 : 50;
+}
+
 function loadConfig(): RuntimeConfig {
   const databaseUrl = process.env.DATABASE_URL;
   if (databaseUrl === undefined) throw new Error('DATABASE_URL is required');
   return {
     databaseUrl,
     tenantId: process.env.ACM_TENANT_ID ?? DEFAULT_TENANT_ID,
-    principalId: process.env.ACM_PRINCIPAL_ID ?? DEFAULT_PRINCIPAL_ID,
+    principalId: process.env.ACM_PRINCIPAL_ID ?? localPrincipalFallback(),
     host: process.env.ACM_HTTP_HOST ?? '127.0.0.1',
     port: Number(process.env.ACM_HTTP_PORT ?? '8080'),
   };
@@ -253,44 +261,16 @@ class AcmService {
     const mode = request.mode ?? 'fast';
     const budgetTokens = request.budgetTokens ?? 6000;
     const session = await this.#loadSession(request.contextHandle);
-    const [embedding] = await this.#provider.embed([request.query]);
+    const vectors = await this.#provider.embed([request.query]);
+    const embedding = vectors[0];
     if (embedding === undefined) throw new Error('embedding provider returned no vector');
-    const vector = sqlVector(embedding);
-    const memories = await this.#db.rows<MemoryRow>(`
-      SELECT
-        m.id::text AS "memoryId",
-        m.category,
-        m.retrieval_text AS text,
-        m.created_at::text AS "createdAt",
-        e.id::text AS "eventId",
-        e.occurred_at::text AS "occurredAt",
-        GREATEST(0, 1 - (m.embedding <=> ${vector}))::float8 AS "semanticScore",
-        GREATEST(0, similarity(m.retrieval_text, ${sqlText(request.query)}))::float8 AS "lexicalScore",
-        CASE
-          WHEN m.session_id = ${sqlUuid(session.sessionId)} THEN 1.0
-          WHEN m.task_external_id IS NOT NULL THEN 0.85
-          WHEN m.workspace_id IS NOT NULL THEN 0.70
-          ELSE 0.50
-        END::float8 AS "scopeScore",
-        (
-          0.50 * GREATEST(0, 1 - (m.embedding <=> ${vector})) +
-          0.35 * GREATEST(0, similarity(m.retrieval_text, ${sqlText(request.query)})) +
-          0.15 * CASE
-            WHEN m.session_id = ${sqlUuid(session.sessionId)} THEN 1.0
-            WHEN m.task_external_id IS NOT NULL THEN 0.85
-            WHEN m.workspace_id IS NOT NULL THEN 0.70
-            ELSE 0.50
-          END
-        )::float8 AS score
-      FROM memory_items m
-      JOIN events e ON e.id = m.source_event_id
-      WHERE m.status = 'active'
-        AND (m.workspace_id IS NULL OR m.workspace_id = ${sqlUuid(session.workspaceId)})
-        AND ${taskPredicate(session, 'm')}
-        AND (m.session_id IS NULL OR m.session_id = ${sqlUuid(session.sessionId)})
-      ORDER BY score DESC, m.created_at DESC
-      LIMIT ${mode === 'accurate' ? 100 : 50}
-    `);
+
+    const memories = await this.#loadRankedMemories(
+      session,
+      request.query,
+      mode,
+      sqlVector(embedding),
+    );
     const overlays = await this.#loadOverlays(session.sessionId);
     const candidates = this.#contextCandidates(memories, overlays, request.includeExplanations);
     const packed = packWithinBudget(candidates, budgetTokens);
@@ -304,16 +284,7 @@ class AcmService {
       omittedItems: packed.omittedItems,
       createdAt: new Date().toISOString(),
     };
-    await this.#db.execute(`
-      INSERT INTO context_packs (
-        id, tenant_id, session_id, mode, query, budget_tokens, used_tokens,
-        selected_items, omitted_items
-      ) VALUES (
-        ${sqlUuid(pack.id)}, ${sqlUuid(this.#tenantId)}, ${sqlUuid(session.sessionId)},
-        ${sqlText(mode)}, ${sqlText(request.query)}, ${budgetTokens}, ${pack.usedTokens},
-        ${sqlJson(pack.items)}, ${pack.omittedItems}
-      )
-    `);
+    await this.#persistContextPack(pack, request.query);
     return pack;
   }
 
@@ -368,6 +339,62 @@ class AcmService {
     const session = sessions[0];
     if (session === undefined) throw new ValidationError('unknown or unauthorized contextHandle');
     return session;
+  }
+
+  async #loadRankedMemories(
+    session: SessionRow,
+    query: string,
+    mode: ContextMode,
+    vector: string,
+  ): Promise<MemoryRow[]> {
+    return await this.#db.rows<MemoryRow>(`
+      SELECT
+        m.id::text AS "memoryId",
+        m.category,
+        m.retrieval_text AS text,
+        m.created_at::text AS "createdAt",
+        e.id::text AS "eventId",
+        e.occurred_at::text AS "occurredAt",
+        GREATEST(0, 1 - (m.embedding <=> ${vector}))::float8 AS "semanticScore",
+        GREATEST(0, similarity(m.retrieval_text, ${sqlText(query)}))::float8 AS "lexicalScore",
+        CASE
+          WHEN m.session_id = ${sqlUuid(session.sessionId)} THEN 1.0
+          WHEN m.task_external_id IS NOT NULL THEN 0.85
+          WHEN m.workspace_id IS NOT NULL THEN 0.70
+          ELSE 0.50
+        END::float8 AS "scopeScore",
+        (
+          0.50 * GREATEST(0, 1 - (m.embedding <=> ${vector})) +
+          0.35 * GREATEST(0, similarity(m.retrieval_text, ${sqlText(query)})) +
+          0.15 * CASE
+            WHEN m.session_id = ${sqlUuid(session.sessionId)} THEN 1.0
+            WHEN m.task_external_id IS NOT NULL THEN 0.85
+            WHEN m.workspace_id IS NOT NULL THEN 0.70
+            ELSE 0.50
+          END
+        )::float8 AS score
+      FROM memory_items m
+      JOIN events e ON e.id = m.source_event_id
+      WHERE m.status = 'active'
+        AND (m.workspace_id IS NULL OR m.workspace_id = ${sqlUuid(session.workspaceId)})
+        AND ${taskPredicate(session, 'm')}
+        AND (m.session_id IS NULL OR m.session_id = ${sqlUuid(session.sessionId)})
+      ORDER BY score DESC, m.created_at DESC
+      LIMIT ${retrievalLimit(mode)}
+    `);
+  }
+
+  async #persistContextPack(pack: ContextPack, query: string): Promise<void> {
+    await this.#db.execute(`
+      INSERT INTO context_packs (
+        id, tenant_id, session_id, mode, query, budget_tokens, used_tokens,
+        selected_items, omitted_items
+      ) VALUES (
+        ${sqlUuid(pack.id)}, ${sqlUuid(this.#tenantId)}, ${sqlUuid(pack.sessionId)},
+        ${sqlText(pack.mode)}, ${sqlText(query)}, ${pack.budgetTokens}, ${pack.usedTokens},
+        ${sqlJson(pack.items)}, ${pack.omittedItems}
+      )
+    `);
   }
 
   async #loadOverlays(sessionId: string): Promise<OverlayRow[]> {
@@ -663,8 +690,10 @@ async function dispatchRequest(
   response: ServerResponse,
 ): Promise<void> {
   const url = new URL(request.url ?? '/', `http://${request.headers?.host ?? 'localhost'}`);
-  if (await handleHealthRoute(service, request, response, url.pathname)) return;
-  if (await handleApiRoute(service, request, response, url.pathname)) return;
+  const healthHandled = await handleHealthRoute(service, request, response, url.pathname);
+  if (healthHandled) return;
+  const apiHandled = await handleApiRoute(service, request, response, url.pathname);
+  if (apiHandled) return;
   if (request.method === 'POST' && url.pathname === '/mcp') {
     writeJson(response, 200, await handleMcp(service, await readJson(request)));
     return;
