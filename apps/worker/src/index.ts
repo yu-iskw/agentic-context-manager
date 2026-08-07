@@ -83,14 +83,6 @@ async function loadEvent(eventId: string): Promise<EventRow> {
 async function processJob(job: ClaimedIngestion, contextProvider: ContextProvider): Promise<void> {
   const event = await loadEvent(job.eventId);
   const memories = await contextProvider.extract(event.content);
-  if (memories.length === 0) {
-    await db.execute(`
-      UPDATE ingestion_status
-      SET status = 'completed', completed_at = now(), last_error = NULL
-      WHERE id = ${sqlUuid(job.ingestionId)}
-    `);
-    return;
-  }
 
   for (const memory of memories) {
     const [embedding] = await contextProvider.embed([memory.retrievalText]);
@@ -123,13 +115,15 @@ async function processJob(job: ClaimedIngestion, contextProvider: ContextProvide
       WHERE source_event_id = ${sqlUuid(event.eventId)}
         AND extractor_id = ${sqlText(memory.extractorId)}
       ON CONFLICT DO NOTHING;
-
-      UPDATE ingestion_status
-      SET status = 'completed', completed_at = now(), last_error = NULL
-      WHERE id = ${sqlUuid(job.ingestionId)};
       COMMIT;
     `);
   }
+
+  await db.execute(`
+    UPDATE ingestion_status
+    SET status = 'completed', completed_at = now(), started_at = NULL, last_error = NULL
+    WHERE id = ${sqlUuid(job.ingestionId)}
+  `);
 }
 
 async function failJob(job: ClaimedIngestion, error: unknown): Promise<void> {
