@@ -24,7 +24,7 @@ function eventText(content: JsonValue): string {
   return JSON.stringify(content);
 }
 
-export function deterministicEmbedding(text: string): number[] {
+function deterministicEmbedding(text: string): number[] {
   const digest = createHash('sha256').update(text.trim().toLowerCase()).digest();
   const values = Array.from(
     { length: 8 },
@@ -34,7 +34,7 @@ export function deterministicEmbedding(text: string): number[] {
   return values.map((value) => value / norm);
 }
 
-export class DeterministicProvider implements ContextProvider {
+class DeterministicProvider implements ContextProvider {
   extract(content: JsonValue): Promise<readonly ExtractedMemory[]> {
     const text = eventText(content).trim();
     if (text === '') return Promise.resolve([]);
@@ -54,7 +54,7 @@ export class DeterministicProvider implements ContextProvider {
   }
 }
 
-export class HttpTestProvider implements ContextProvider {
+class HttpTestProvider implements ContextProvider {
   readonly #baseUrl: string;
 
   constructor(baseUrl: string) {
