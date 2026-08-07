@@ -80,12 +80,27 @@ const immediateRecall = await jsonRequest(`${baseUrl}/v1/context/query`, {
 });
 assert.equal(immediateRecall.response.status, 200);
 assert.ok(
-  immediateRecall.body.items.some((item) => item.category === 'recent-event' && item.text.includes('PostgreSQL')),
+  immediateRecall.body.items.some(
+    (item) => item.category === 'recent-event' && item.text.includes('PostgreSQL'),
+  ),
   'pending event should be visible through the recent-event overlay',
 );
 
 console.log('integration: worker materializes memory');
 await waitForIngestion(firstEvent.body.ingestionId);
+
+console.log('integration: validated checkpoint preserves the decision');
+const checkpoint = await jsonRequest(`${baseUrl}/v1/context/checkpoint`, {
+  method: 'POST',
+  body: JSON.stringify({ contextHandle, budgetTokens: 500 }),
+});
+assert.equal(checkpoint.response.status, 201);
+assert.equal(checkpoint.body.status, 'validated');
+assert.equal(checkpoint.body.validation.coverage, 1);
+assert.ok(checkpoint.body.sourceMemoryIds.length > 0);
+assert.ok(checkpoint.body.summary.includes('[decision]'));
+assert.ok(checkpoint.body.summary.includes('PostgreSQL'));
+assert.ok(checkpoint.body.usedTokens <= 500);
 
 console.log('integration: idempotency keys are scoped to a session');
 const secondSession = await createSession();
@@ -114,7 +129,11 @@ const recall = await jsonRequest(`${baseUrl}/v1/context/query`, {
 assert.equal(recall.response.status, 200);
 assert.ok(recall.body.usedTokens <= 500);
 assert.ok(recall.body.items.some((item) => item.text.includes('PostgreSQL')));
-assert.ok(recall.body.items.some((item) => item.selectedBecause.some((reason) => reason.includes('authorized'))));
+assert.ok(
+  recall.body.items.some((item) =>
+    item.selectedBecause.some((reason) => reason.includes('authorized')),
+  ),
+);
 
 console.log('integration: invalid context handle is rejected');
 const denied = await jsonRequest(`${baseUrl}/v1/context/query`, {
@@ -134,7 +153,12 @@ const toolsList = await jsonRequest(mcpUrl, {
 assert.equal(toolsList.response.status, 200);
 assert.deepEqual(
   toolsList.body.result.tools.map((tool) => tool.name),
-  ['acm.session.start', 'acm.event.record', 'acm.context.recall'],
+  [
+    'acm.session.start',
+    'acm.event.record',
+    'acm.context.recall',
+    'acm.context.checkpoint',
+  ],
 );
 
 console.log('integration: MCP context recall');
@@ -156,6 +180,28 @@ const mcpRecall = await jsonRequest(mcpUrl, {
 });
 assert.equal(mcpRecall.response.status, 200);
 assert.equal(mcpRecall.body.result.isError, false);
-assert.ok(mcpRecall.body.result.structuredContent.items.some((item) => item.text.includes('Docker Compose')));
+assert.ok(
+  mcpRecall.body.result.structuredContent.items.some((item) =>
+    item.text.includes('Docker Compose'),
+  ),
+);
+
+console.log('integration: MCP validated checkpoint');
+const mcpCheckpoint = await jsonRequest(mcpUrl, {
+  method: 'POST',
+  body: JSON.stringify({
+    jsonrpc: '2.0',
+    id: 3,
+    method: 'tools/call',
+    params: {
+      name: 'acm.context.checkpoint',
+      arguments: { contextHandle, budgetTokens: 500 },
+    },
+  }),
+});
+assert.equal(mcpCheckpoint.response.status, 200);
+assert.equal(mcpCheckpoint.body.result.isError, false);
+assert.equal(mcpCheckpoint.body.result.structuredContent.status, 'validated');
+assert.equal(mcpCheckpoint.body.result.structuredContent.validation.coverage, 1);
 
 console.log('integration: PASS');
