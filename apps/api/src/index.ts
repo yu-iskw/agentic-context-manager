@@ -3,13 +3,21 @@ import { createServer, type IncomingMessage, type ServerResponse } from 'node:ht
 
 import {
   ValidationError,
+  parseContextCheckpointRequest,
   parseContextQueryRequest,
   parseRecordEventRequest,
   parseStartSessionRequest,
+  type ContextCheckpoint,
   type ContextPack,
   type JsonValue,
 } from '../../../packages/contracts/src/index.js';
-import { estimateTokens, packWithinBudget, type RankedContextCandidate } from '../../../packages/core/src/index.js';
+import {
+  buildValidatedCheckpoint,
+  estimateTokens,
+  packWithinBudget,
+  type CheckpointCandidate,
+  type RankedContextCandidate,
+} from '../../../packages/core/src/index.js';
 import {
   PsqlClient,
   sqlJson,
@@ -19,7 +27,10 @@ import {
   sqlUuid,
   sqlVector,
 } from '../../../packages/db/src/psql.js';
-import { createProviderFromEnvironment, type ContextProvider } from '../../../packages/providers/src/index.js';
+import {
+  createProviderFromEnvironment,
+  type ContextProvider,
+} from '../../../packages/providers/src/index.js';
 
 const DEFAULT_TENANT_ID = '00000000-0000-4000-8000-000000000001';
 const DEFAULT_PRINCIPAL_ID = '00000000-0000-4000-8000-000000000002';
@@ -114,6 +125,11 @@ function contentHash(content: JsonValue): string {
   return digest.toString('hex');
 }
 
+function taskPredicate(session: SessionRow, tableAlias: string): string {
+  if (session.taskExternalId === null) return `${tableAlias}.task_external_id IS NULL`;
+  return `(${tableAlias}.task_external_id IS NULL OR ${tableAlias}.task_external_id = ${sqlText(session.taskExternalId)})`;
+}
+
 class AcmService {
   readonly #db: PsqlClient;
   readonly #provider: ContextProvider;
@@ -127,7 +143,20 @@ class AcmService {
     this.#principalId = config.principalId;
   }
 
-  async startSession(body: unknown): Promise<{ sessionId: string; contextHandle: string; architectureVersion: string }> {
+  async ready(): Promise<boolean> {
+    const rows = await this.#db.rows<{ ready: number }>(`
+      SELECT 1 AS ready
+      FROM principals
+      WHERE id = ${sqlUuid(this.#principalId)}
+        AND tenant_id = ${sqlUuid(this.#tenantId)}
+      LIMIT 1
+    `);
+    return rows.length === 1;
+  }
+
+  async startSession(
+    body: unknown,
+  ): Promise<{ sessionId: string; contextHandle: string; architectureVersion: string }> {
     const request = parseStartSessionRequest(body);
     const workspaceId = randomUUID();
     const sessionId = randomUUID();
@@ -179,7 +208,8 @@ class AcmService {
         SELECT
           ${sqlUuid(eventId)}, ${sqlUuid(this.#tenantId)}, ${sqlUuid(this.#principalId)}, target_session.id,
           ${sqlText(request.kind)}, ${sqlTimestamp(occurredAt)}, ${sqlJson(request.content)},
-          ${sqlJson(request.metadata ?? {})}, ${sqlNullableText(idempotencyKey)}, ${sqlText(contentHash(request.content))}
+          ${sqlJson(request.metadata ?? {})}, ${sqlNullableText(idempotencyKey)},
+          ${sqlText(contentHash(request.content))}
         FROM target_session
         ON CONFLICT (tenant_id, session_id, idempotency_key)
         DO UPDATE SET idempotency_key = EXCLUDED.idempotency_key
@@ -222,26 +252,10 @@ class AcmService {
     const request = parseContextQueryRequest(body);
     const mode = request.mode ?? 'fast';
     const budgetTokens = request.budgetTokens ?? 6000;
-    const sessions = await this.#db.rows<SessionRow>(`
-      SELECT
-        id::text AS "sessionId",
-        context_handle::text AS "contextHandle",
-        workspace_id::text AS "workspaceId",
-        task_external_id AS "taskExternalId"
-      FROM sessions
-      WHERE context_handle = ${sqlUuid(request.contextHandle)}
-        AND principal_id = ${sqlUuid(this.#principalId)}
-    `);
-    const session = sessions[0];
-    if (session === undefined) throw new ValidationError('unknown or unauthorized contextHandle');
-
+    const session = await this.#loadSession(request.contextHandle);
     const [embedding] = await this.#provider.embed([request.query]);
     if (embedding === undefined) throw new Error('embedding provider returned no vector');
     const vector = sqlVector(embedding);
-    const taskPredicate = session.taskExternalId === null
-      ? 'm.task_external_id IS NULL'
-      : `(m.task_external_id IS NULL OR m.task_external_id = ${sqlText(session.taskExternalId)})`;
-
     const memories = await this.#db.rows<MemoryRow>(`
       SELECT
         m.id::text AS "memoryId",
@@ -272,26 +286,111 @@ class AcmService {
       JOIN events e ON e.id = m.source_event_id
       WHERE m.status = 'active'
         AND (m.workspace_id IS NULL OR m.workspace_id = ${sqlUuid(session.workspaceId)})
-        AND ${taskPredicate}
+        AND ${taskPredicate(session, 'm')}
         AND (m.session_id IS NULL OR m.session_id = ${sqlUuid(session.sessionId)})
       ORDER BY score DESC, m.created_at DESC
       LIMIT ${mode === 'accurate' ? 100 : 50}
     `);
+    const overlays = await this.#loadOverlays(session.sessionId);
+    const candidates = this.#contextCandidates(memories, overlays, request.includeExplanations);
+    const packed = packWithinBudget(candidates, budgetTokens);
+    const pack: ContextPack = {
+      id: randomUUID(),
+      sessionId: session.sessionId,
+      mode,
+      budgetTokens,
+      usedTokens: packed.usedTokens,
+      items: packed.selected,
+      omittedItems: packed.omittedItems,
+      createdAt: new Date().toISOString(),
+    };
+    await this.#db.execute(`
+      INSERT INTO context_packs (
+        id, tenant_id, session_id, mode, query, budget_tokens, used_tokens,
+        selected_items, omitted_items
+      ) VALUES (
+        ${sqlUuid(pack.id)}, ${sqlUuid(this.#tenantId)}, ${sqlUuid(session.sessionId)},
+        ${sqlText(mode)}, ${sqlText(request.query)}, ${budgetTokens}, ${pack.usedTokens},
+        ${sqlJson(pack.items)}, ${pack.omittedItems}
+      )
+    `);
+    return pack;
+  }
 
-    const overlays = await this.#db.rows<OverlayRow>(`
+  async checkpoint(body: unknown): Promise<ContextCheckpoint> {
+    const request = parseContextCheckpointRequest(body);
+    const budgetTokens = request.budgetTokens ?? 6000;
+    const session = await this.#loadSession(request.contextHandle);
+    await this.#assertCheckpointStable(session.sessionId);
+    const candidates = await this.#checkpointCandidates(session);
+    const built = buildValidatedCheckpoint(candidates, budgetTokens);
+    if (built.status === 'rejected') {
+      throw new ValidationError(
+        `checkpoint rejected: preserved ${built.validation.preservedCount} of ${built.validation.mustPreserveCount} required memories`,
+      );
+    }
+
+    const checkpoint: ContextCheckpoint = {
+      id: randomUUID(),
+      sessionId: session.sessionId,
+      status: 'validated',
+      budgetTokens,
+      usedTokens: built.usedTokens,
+      summary: built.summary,
+      sourceMemoryIds: built.sourceMemoryIds,
+      validation: built.validation,
+      createdAt: new Date().toISOString(),
+    };
+    await this.#db.execute(`
+      INSERT INTO checkpoints (
+        id, tenant_id, session_id, status, budget_tokens, used_tokens,
+        summary, source_memory_ids, validation
+      ) VALUES (
+        ${sqlUuid(checkpoint.id)}, ${sqlUuid(this.#tenantId)}, ${sqlUuid(session.sessionId)},
+        'validated', ${budgetTokens}, ${checkpoint.usedTokens}, ${sqlText(checkpoint.summary)},
+        ${sqlJson(checkpoint.sourceMemoryIds)}, ${sqlJson(checkpoint.validation)}
+      )
+    `);
+    return checkpoint;
+  }
+
+  async #loadSession(contextHandle: string): Promise<SessionRow> {
+    const sessions = await this.#db.rows<SessionRow>(`
+      SELECT
+        id::text AS "sessionId",
+        context_handle::text AS "contextHandle",
+        workspace_id::text AS "workspaceId",
+        task_external_id AS "taskExternalId"
+      FROM sessions
+      WHERE context_handle = ${sqlUuid(contextHandle)}
+        AND principal_id = ${sqlUuid(this.#principalId)}
+    `);
+    const session = sessions[0];
+    if (session === undefined) throw new ValidationError('unknown or unauthorized contextHandle');
+    return session;
+  }
+
+  async #loadOverlays(sessionId: string): Promise<OverlayRow[]> {
+    return await this.#db.rows<OverlayRow>(`
       SELECT
         e.id::text AS "eventId",
         COALESCE(e.content ->> 'text', e.content::text) AS text,
         e.occurred_at::text AS "occurredAt"
       FROM events e
       JOIN ingestion_status i ON i.event_id = e.id
-      WHERE e.session_id = ${sqlUuid(session.sessionId)}
+      WHERE e.session_id = ${sqlUuid(sessionId)}
         AND i.status IN ('pending', 'processing')
       ORDER BY e.occurred_at DESC
       LIMIT 8
     `);
+  }
 
-    const candidates: RankedContextCandidate[] = [
+  #contextCandidates(
+    memories: readonly MemoryRow[],
+    overlays: readonly OverlayRow[],
+    includeExplanations: boolean | undefined,
+  ): RankedContextCandidate[] {
+    return [
       ...overlays.map((row) => ({
         memoryId: `event:${row.eventId}`,
         category: 'recent-event',
@@ -308,39 +407,49 @@ class AcmService {
         text: row.text,
         score: row.score,
         estimatedTokens: estimateTokens(row.text),
-        selectedBecause: request.includeExplanations === false
-          ? []
-          : [
-              `semantic=${row.semanticScore.toFixed(3)}`,
-              `lexical=${row.lexicalScore.toFixed(3)}`,
-              `scope=${row.scopeScore.toFixed(3)}`,
-              'authorized before ranking',
-            ],
+        selectedBecause:
+          includeExplanations === false
+            ? []
+            : [
+                `semantic=${row.semanticScore.toFixed(3)}`,
+                `lexical=${row.lexicalScore.toFixed(3)}`,
+                `scope=${row.scopeScore.toFixed(3)}`,
+                'authorized before ranking',
+              ],
         provenance: [{ eventId: row.eventId, occurredAt: row.occurredAt }],
         createdAt: row.createdAt,
       })),
     ];
+  }
 
-    const packed = packWithinBudget(candidates, budgetTokens);
-    const pack: ContextPack = {
-      id: randomUUID(),
-      sessionId: session.sessionId,
-      mode,
-      budgetTokens,
-      usedTokens: packed.usedTokens,
-      items: packed.selected,
-      omittedItems: packed.omittedItems,
-      createdAt: new Date().toISOString(),
-    };
-    await this.#db.execute(`
-      INSERT INTO context_packs (
-        id, tenant_id, session_id, mode, query, budget_tokens, used_tokens, selected_items, omitted_items
-      ) VALUES (
-        ${sqlUuid(pack.id)}, ${sqlUuid(this.#tenantId)}, ${sqlUuid(session.sessionId)}, ${sqlText(mode)},
-        ${sqlText(request.query)}, ${budgetTokens}, ${pack.usedTokens}, ${sqlJson(pack.items)}, ${pack.omittedItems}
-      )
+  async #assertCheckpointStable(sessionId: string): Promise<void> {
+    const rows = await this.#db.rows<{ count: number }>(`
+      SELECT count(*)::int AS count
+      FROM ingestion_status i
+      JOIN events e ON e.id = i.event_id
+      WHERE e.session_id = ${sqlUuid(sessionId)}
+        AND i.status IN ('pending', 'processing')
     `);
-    return pack;
+    if ((rows[0]?.count ?? 0) > 0) {
+      throw new ValidationError('checkpoint requires all session ingestions to finish');
+    }
+  }
+
+  async #checkpointCandidates(session: SessionRow): Promise<CheckpointCandidate[]> {
+    return await this.#db.rows<CheckpointCandidate>(`
+      SELECT
+        m.id::text AS "memoryId",
+        m.category,
+        m.retrieval_text AS text,
+        m.created_at::text AS "createdAt"
+      FROM memory_items m
+      WHERE m.status = 'active'
+        AND (m.workspace_id IS NULL OR m.workspace_id = ${sqlUuid(session.workspaceId)})
+        AND ${taskPredicate(session, 'm')}
+        AND (m.session_id IS NULL OR m.session_id = ${sqlUuid(session.sessionId)})
+      ORDER BY m.created_at DESC
+      LIMIT 500
+    `);
   }
 }
 
@@ -355,7 +464,11 @@ const tools = [
     inputSchema: {
       type: 'object',
       properties: {
-        workspace: { type: 'object', properties: { externalId: { type: 'string' } }, required: ['externalId'] },
+        workspace: {
+          type: 'object',
+          properties: { externalId: { type: 'string' } },
+          required: ['externalId'],
+        },
         task: { type: 'object', properties: { externalId: { type: 'string' } } },
         agent: { type: 'object', properties: { name: { type: 'string' } } },
       },
@@ -394,39 +507,78 @@ const tools = [
       additionalProperties: false,
     },
   },
+  {
+    name: 'acm.context.checkpoint',
+    description: 'Create a validated, token-budgeted extractive checkpoint.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        contextHandle: { type: 'string' },
+        budgetTokens: { type: 'integer', minimum: 64, maximum: 32000 },
+      },
+      required: ['contextHandle'],
+      additionalProperties: false,
+    },
+  },
 ] as const;
 
-async function handleMcp(service: AcmService, body: unknown): Promise<Record<string, unknown>> {
-  if (typeof body !== 'object' || body === null || Array.isArray(body)) return rpcError(null, -32600, 'Invalid Request');
-  const message = body as Record<string, unknown>;
-  const id = message.id;
-  if (message.jsonrpc !== '2.0' || typeof message.method !== 'string') return rpcError(id, -32600, 'Invalid Request');
+function recordValue(value: unknown): Record<string, unknown> | undefined {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return undefined;
+  return value as Record<string, unknown>;
+}
 
-  if (message.method === 'tools/list') return { jsonrpc: '2.0', id: id ?? null, result: { tools } };
-  if (message.method === 'initialize') {
-    return {
-      jsonrpc: '2.0',
-      id: id ?? null,
-      result: {
-        protocolVersion: '2026-07-28',
-        capabilities: { tools: {} },
-        serverInfo: { name: 'agentic-context-manager', version: '0.1.0' },
-      },
-    };
+async function callMcpTool(service: AcmService, name: unknown, args: unknown): Promise<unknown> {
+  switch (name) {
+    case 'acm.session.start':
+      return await service.startSession(args);
+    case 'acm.event.record':
+      return await service.recordEvent(args);
+    case 'acm.context.recall':
+      return await service.recall(args);
+    case 'acm.context.checkpoint':
+      return await service.checkpoint(args);
+    default:
+      throw new ValidationError(`unknown tool: ${String(name)}`);
   }
-  if (message.method !== 'tools/call') return rpcError(id, -32601, 'Method not found');
+}
 
-  const params = message.params;
-  if (typeof params !== 'object' || params === null || Array.isArray(params)) return rpcError(id, -32602, 'Invalid params');
-  const call = params as Record<string, unknown>;
-  const name = call.name;
-  const args = call.arguments ?? {};
+async function handleMcp(service: AcmService, body: unknown): Promise<Record<string, unknown>> {
+  const message = recordValue(body);
+  if (message === undefined) return rpcError(null, -32600, 'Invalid Request');
+  const id = message.id;
+  if (message.jsonrpc !== '2.0' || typeof message.method !== 'string') {
+    return rpcError(id, -32600, 'Invalid Request');
+  }
+
+  switch (message.method) {
+    case 'initialize':
+      return {
+        jsonrpc: '2.0',
+        id: id ?? null,
+        result: {
+          protocolVersion: '2026-07-28',
+          capabilities: { tools: {} },
+          serverInfo: { name: 'agentic-context-manager', version: '0.1.0' },
+        },
+      };
+    case 'tools/list':
+      return { jsonrpc: '2.0', id: id ?? null, result: { tools } };
+    case 'tools/call':
+      return await handleMcpToolCall(service, id, message.params);
+    default:
+      return rpcError(id, -32601, 'Method not found');
+  }
+}
+
+async function handleMcpToolCall(
+  service: AcmService,
+  id: unknown,
+  paramsValue: unknown,
+): Promise<Record<string, unknown>> {
+  const params = recordValue(paramsValue);
+  if (params === undefined) return rpcError(id, -32602, 'Invalid params');
   try {
-    let result: unknown;
-    if (name === 'acm.session.start') result = await service.startSession(args);
-    else if (name === 'acm.event.record') result = await service.recordEvent(args);
-    else if (name === 'acm.context.recall') result = await service.recall(args);
-    else return rpcError(id, -32602, `Unknown tool: ${String(name)}`);
+    const result = await callMcpTool(service, params.name, params.arguments ?? {});
     return {
       jsonrpc: '2.0',
       id: id ?? null,
@@ -437,64 +589,120 @@ async function handleMcp(service: AcmService, body: unknown): Promise<Record<str
       },
     };
   } catch (error) {
-    const messageText = error instanceof Error ? error.message : String(error);
+    const message = error instanceof Error ? error.message : String(error);
     return {
       jsonrpc: '2.0',
       id: id ?? null,
-      result: { content: [{ type: 'text', text: messageText }], isError: true },
+      result: { content: [{ type: 'text', text: message }], isError: true },
     };
   }
+}
+
+async function handleHealthRoute(
+  service: AcmService,
+  request: IncomingMessage,
+  response: ServerResponse,
+  path: string,
+): Promise<boolean> {
+  if (request.method !== 'GET') return false;
+  if (path === '/health/live') {
+    writeJson(response, 200, { status: 'ok' });
+    return true;
+  }
+  if (path !== '/health/ready') return false;
+  const ready = await service.ready();
+  writeJson(response, ready ? 200 : 503, { status: ready ? 'ready' : 'not_ready' });
+  return true;
+}
+
+async function handleApiRoute(
+  service: AcmService,
+  request: IncomingMessage,
+  response: ServerResponse,
+  path: string,
+): Promise<boolean> {
+  if (request.method === 'POST' && path === '/v1/sessions') {
+    writeJson(response, 201, await service.startSession(await readJson(request)));
+    return true;
+  }
+  if (request.method === 'POST' && path === '/v1/events') {
+    writeJson(response, 202, await service.recordEvent(await readJson(request)));
+    return true;
+  }
+  if (request.method === 'POST' && path === '/v1/context/query') {
+    writeJson(response, 200, await service.recall(await readJson(request)));
+    return true;
+  }
+  if (request.method === 'POST' && path === '/v1/context/checkpoint') {
+    writeJson(response, 201, await service.checkpoint(await readJson(request)));
+    return true;
+  }
+  return await handleIngestionRoute(service, request, response, path);
+}
+
+async function handleIngestionRoute(
+  service: AcmService,
+  request: IncomingMessage,
+  response: ServerResponse,
+  path: string,
+): Promise<boolean> {
+  if (request.method !== 'GET' || !path.startsWith('/v1/ingestions/')) return false;
+  const ingestionId = path.slice('/v1/ingestions/'.length);
+  const result = await service.ingestionStatus(ingestionId);
+  if (result === undefined) {
+    writeJson(response, 404, { error: { code: 'not_found', message: 'ingestion not found' } });
+  } else {
+    writeJson(response, 200, result);
+  }
+  return true;
+}
+
+async function dispatchRequest(
+  service: AcmService,
+  request: IncomingMessage,
+  response: ServerResponse,
+): Promise<void> {
+  const url = new URL(request.url ?? '/', `http://${request.headers?.host ?? 'localhost'}`);
+  if (await handleHealthRoute(service, request, response, url.pathname)) return;
+  if (await handleApiRoute(service, request, response, url.pathname)) return;
+  if (request.method === 'POST' && url.pathname === '/mcp') {
+    writeJson(response, 200, await handleMcp(service, await readJson(request)));
+    return;
+  }
+  writeJson(response, 404, { error: { code: 'not_found', message: 'route not found' } });
+}
+
+function writeRequestError(response: ServerResponse, error: unknown): void {
+  if (error instanceof ValidationError) {
+    writeJson(response, 400, { error: { code: error.code, message: error.message } });
+    return;
+  }
+  const message = error instanceof Error ? error.message : String(error);
+  console.error(JSON.stringify({ level: 'error', message }));
+  writeJson(response, 500, {
+    error: { code: 'internal_error', message: 'internal server error' },
+  });
 }
 
 const config = loadConfig();
 const service = new AcmService(config, createProviderFromEnvironment());
 const server = createServer(async (request, response) => {
   try {
-    const url = new URL(request.url ?? '/', `http://${request.headers?.host ?? 'localhost'}`);
-    if (request.method === 'GET' && url.pathname === '/health/live') {
-      writeJson(response, 200, { status: 'ok' });
-      return;
-    }
-    if (request.method === 'GET' && url.pathname === '/health/ready') {
-      writeJson(response, 200, { status: 'ready' });
-      return;
-    }
-    if (request.method === 'POST' && url.pathname === '/v1/sessions') {
-      writeJson(response, 201, await service.startSession(await readJson(request)));
-      return;
-    }
-    if (request.method === 'POST' && url.pathname === '/v1/events') {
-      writeJson(response, 202, await service.recordEvent(await readJson(request)));
-      return;
-    }
-    if (request.method === 'GET' && url.pathname.startsWith('/v1/ingestions/')) {
-      const result = await service.ingestionStatus(url.pathname.slice('/v1/ingestions/'.length));
-      if (result === undefined) writeJson(response, 404, { error: { code: 'not_found', message: 'ingestion not found' } });
-      else writeJson(response, 200, result);
-      return;
-    }
-    if (request.method === 'POST' && url.pathname === '/v1/context/query') {
-      writeJson(response, 200, await service.recall(await readJson(request)));
-      return;
-    }
-    if (request.method === 'POST' && url.pathname === '/mcp') {
-      writeJson(response, 200, await handleMcp(service, await readJson(request)));
-      return;
-    }
-    writeJson(response, 404, { error: { code: 'not_found', message: 'route not found' } });
+    await dispatchRequest(service, request, response);
   } catch (error) {
-    if (error instanceof ValidationError) {
-      writeJson(response, 400, { error: { code: error.code, message: error.message } });
-      return;
-    }
-    const message = error instanceof Error ? error.message : String(error);
-    console.error(JSON.stringify({ level: 'error', message }));
-    writeJson(response, 500, { error: { code: 'internal_error', message: 'internal server error' } });
+    writeRequestError(response, error);
   }
 });
 
 server.listen(config.port, config.host, () => {
-  console.log(JSON.stringify({ level: 'info', message: 'ACM API listening', host: config.host, port: config.port }));
+  console.log(
+    JSON.stringify({
+      level: 'info',
+      message: 'ACM API listening',
+      host: config.host,
+      port: config.port,
+    }),
+  );
 });
 
 function shutdown(): void {
