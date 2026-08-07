@@ -37,28 +37,34 @@ function toContextPackItem(candidate: RankedContextCandidate): ContextPackItem {
   };
 }
 
+function compareRankedCandidates(
+  left: RankedContextCandidate,
+  right: RankedContextCandidate,
+): number {
+  const scoreDifference = right.score - left.score;
+  return scoreDifference === 0
+    ? right.createdAt.localeCompare(left.createdAt)
+    : scoreDifference;
+}
+
+function normalizedText(text: string): string {
+  return text.trim().replaceAll(/\s+/g, ' ').toLowerCase();
+}
+
 export function packWithinBudget(
   candidates: readonly RankedContextCandidate[],
   budgetTokens: number,
 ): { selected: ContextPackItem[]; usedTokens: number; omittedItems: number } {
-  const sorted = [...candidates].sort((left, right) => {
-    const scoreDifference = right.score - left.score;
-    if (scoreDifference !== 0) return scoreDifference;
-    return right.createdAt.localeCompare(left.createdAt);
-  });
-
+  const sorted = [...candidates].sort(compareRankedCandidates);
   const selected: ContextPackItem[] = [];
+  const seen = new Set<string>();
   let usedTokens = 0;
   let omittedItems = 0;
-  const seen = new Set<string>();
 
   for (const candidate of sorted) {
-    const normalized = candidate.text.trim().replaceAll(/\s+/g, ' ').toLowerCase();
-    if (seen.has(normalized)) {
-      omittedItems += 1;
-      continue;
-    }
-    if (usedTokens + candidate.estimatedTokens > budgetTokens) {
+    const normalized = normalizedText(candidate.text);
+    const exceedsBudget = usedTokens + candidate.estimatedTokens > budgetTokens;
+    if (seen.has(normalized) || exceedsBudget) {
       omittedItems += 1;
       continue;
     }
@@ -76,7 +82,7 @@ function uniqueCheckpointCandidates(
   const seen = new Set<string>();
   const unique: CheckpointCandidate[] = [];
   for (const candidate of candidates) {
-    const normalized = candidate.text.trim().replaceAll(/\s+/g, ' ').toLowerCase();
+    const normalized = normalizedText(candidate.text);
     if (normalized === '' || seen.has(normalized)) continue;
     seen.add(normalized);
     unique.push(candidate);
@@ -88,19 +94,21 @@ function checkpointLine(candidate: CheckpointCandidate): string {
   return `- [${candidate.category}] ${candidate.text.trim()}`;
 }
 
+function compareCheckpointRecency(left: CheckpointCandidate, right: CheckpointCandidate): number {
+  return right.createdAt.localeCompare(left.createdAt);
+}
+
 export function buildValidatedCheckpoint(
   candidates: readonly CheckpointCandidate[],
   budgetTokens: number,
 ): CheckpointBuildResult {
   const unique = uniqueCheckpointCandidates(candidates);
-  const byRecency = (left: CheckpointCandidate, right: CheckpointCandidate): number =>
-    right.createdAt.localeCompare(left.createdAt);
   const mustPreserve = unique
     .filter((candidate) => MUST_PRESERVE_CATEGORIES.has(candidate.category))
-    .sort(byRecency);
+    .sort(compareCheckpointRecency);
   const optional = unique
     .filter((candidate) => !MUST_PRESERVE_CATEGORIES.has(candidate.category))
-    .sort(byRecency);
+    .sort(compareCheckpointRecency);
 
   const selected: CheckpointCandidate[] = [];
   let usedTokens = 0;
@@ -112,7 +120,9 @@ export function buildValidatedCheckpoint(
   }
 
   const selectedIds = new Set(selected.map((candidate) => candidate.memoryId));
-  const preservedCount = mustPreserve.filter((candidate) => selectedIds.has(candidate.memoryId)).length;
+  const preservedCount = mustPreserve.filter((candidate) =>
+    selectedIds.has(candidate.memoryId),
+  ).length;
   const validation: ContextCheckpointValidation = {
     mustPreserveCount: mustPreserve.length,
     preservedCount,
