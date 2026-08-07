@@ -1,10 +1,13 @@
 {
   "$schema": "https://unpkg.com/knip@6/schema.json",
   "ignoreBinaries": ["grype", "docker"],
+  "ignoreDependencies": ["@types/node", "@vitest/coverage-v8", "prettier"],
   "workspaces": {
     ".": {
       "entry": [
+        "eslint.config.mjs",
         "stylelint.config.mjs",
+        "vitest.config.ts",
         "apps/api/src/index.ts",
         "apps/worker/src/index.ts",
         "apps/cli/src/index.ts",
