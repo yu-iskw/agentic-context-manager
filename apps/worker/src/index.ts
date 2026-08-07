@@ -37,7 +37,7 @@ const tenantId = process.env.ACM_TENANT_ID ?? DEFAULT_TENANT_ID;
 const pollMilliseconds = Number(process.env.ACM_WORKER_POLL_MS ?? '250');
 const db = new PsqlClient({ databaseUrl, tenantId });
 const provider = createProviderFromEnvironment();
-let stopping = false;
+const workerState = { stopRequested: false };
 
 async function recoverAbandonedJobs(): Promise<void> {
   await db.execute(`
@@ -98,7 +98,8 @@ async function processJob(job: ClaimedIngestion, contextProvider: ContextProvide
   const memories = await contextProvider.extract(event.content);
 
   for (const memory of memories) {
-    const [embedding] = await contextProvider.embed([memory.retrievalText]);
+    const vectors = await contextProvider.embed([memory.retrievalText]);
+    const embedding = vectors[0];
     if (embedding === undefined) throw new Error('embedding provider returned no vector');
     const memoryId = randomUUID();
     const category = memoryCategory(event.kind, memory.category);
@@ -141,16 +142,27 @@ async function processJob(job: ClaimedIngestion, contextProvider: ContextProvide
   `);
 }
 
+function retrySql(job: ClaimedIngestion): { shouldRetry: boolean; status: string; nextAttempt: string } {
+  const shouldRetry = job.attempts < 3;
+  return {
+    shouldRetry,
+    status: shouldRetry ? 'pending' : 'failed',
+    nextAttempt: shouldRetry
+      ? `now() + interval '${Math.min(30, 2 ** job.attempts)} seconds'`
+      : 'now()',
+  };
+}
+
 async function failJob(job: ClaimedIngestion, error: unknown): Promise<void> {
   const message = error instanceof Error ? error.message : String(error);
-  const retry = job.attempts < 3;
+  const retry = retrySql(job);
   await db.execute(`
     UPDATE ingestion_status
     SET
-      status = ${sqlText(retry ? 'pending' : 'failed')},
+      status = ${sqlText(retry.status)},
       last_error = ${sqlText(message.slice(0, 2000))},
       started_at = NULL,
-      next_attempt_at = ${retry ? `now() + interval '${Math.min(30, 2 ** job.attempts)} seconds'` : 'now()'}
+      next_attempt_at = ${retry.nextAttempt}
     WHERE id = ${sqlUuid(job.ingestionId)}
   `);
   console.error(
@@ -159,7 +171,7 @@ async function failJob(job: ClaimedIngestion, error: unknown): Promise<void> {
       message: 'ingestion failed',
       ingestionId: job.ingestionId,
       attempts: job.attempts,
-      retry,
+      retry: retry.shouldRetry,
     }),
   );
 }
@@ -171,7 +183,7 @@ async function sleep(milliseconds: number): Promise<void> {
 async function run(): Promise<void> {
   await recoverAbandonedJobs();
   console.log(JSON.stringify({ level: 'info', message: 'ACM worker started' }));
-  while (!stopping) {
+  while (workerState.stopRequested === false) {
     const job = await claimJob();
     if (job === undefined) {
       await sleep(pollMilliseconds);
@@ -186,11 +198,11 @@ async function run(): Promise<void> {
   console.log(JSON.stringify({ level: 'info', message: 'ACM worker stopped' }));
 }
 
-process.on('SIGTERM', () => {
-  stopping = true;
-});
-process.on('SIGINT', () => {
-  stopping = true;
-});
+function requestStop(): void {
+  workerState.stopRequested = true;
+}
+
+process.on('SIGTERM', requestStop);
+process.on('SIGINT', requestStop);
 
 await run();
