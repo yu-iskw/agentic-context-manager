@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 
-import { PsqlClient, sqlJson, sqlNullableText, sqlText, sqlUuid, sqlVector } from '../../../packages/db/src/psql.js';
+import { PsqlClient, sqlJson, sqlNullableText, sqlNumber, sqlText, sqlUuid, sqlVector } from '../../../packages/db/src/psql.js';
 import { createProviderFromEnvironment } from '../../../packages/providers/src/index.js';
 
 import type { JsonValue } from '../../../packages/contracts/src/index.js';
@@ -94,7 +94,7 @@ async function processJob(job: ClaimedIngestion, contextProvider: ContextProvide
         ${sqlUuid(memoryId)}, ${sqlUuid(tenantId)}, ${sqlUuid(event.workspaceId)},
         ${sqlNullableText(event.taskExternalId)}, NULL, ${sqlText(memory.category)},
         ${sqlJson(memory.structuredValue)}, ${sqlText(memory.retrievalText)}, ${sqlVector(embedding)},
-        ${memory.confidence}, ${sqlText('coding-agent-default-v1')}, ${sqlText(memory.extractorId)},
+        ${sqlNumber(memory.confidence)}, ${sqlText('coding-agent-default-v1')}, ${sqlText(memory.extractorId)},
         ${sqlUuid(event.eventId)}, 'active'
       )
       ON CONFLICT (source_event_id, extractor_id)
