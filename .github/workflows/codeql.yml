@@ -17,7 +17,26 @@ name: CodeQL
 on:
   push:
     branches: [main]
+    paths:
+      - "src/**/*.ts"
+      - "src/**/*.tsx"
+      - "packages/**/*.ts"
+      - "packages/**/*.tsx"
+      - package.json
+      - pnpm-lock.yaml
+      - "tsconfig*.json"
+      - .github/workflows/codeql.yml
   pull_request:
+    types: [opened, reopened, ready_for_review]
+    paths:
+      - "src/**/*.ts"
+      - "src/**/*.tsx"
+      - "packages/**/*.ts"
+      - "packages/**/*.tsx"
+      - package.json
+      - pnpm-lock.yaml
+      - "tsconfig*.json"
+      - .github/workflows/codeql.yml
   workflow_dispatch:
 
 concurrency:
@@ -33,47 +52,20 @@ jobs:
   analyze:
     name: Analyze
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        language: [javascript-typescript]
-
     steps:
       - name: Checkout
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
-
-      - name: Enable Corepack
-        run: corepack enable
-
       - name: Harden Runner
         uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
         with:
           egress-policy: audit
-
       - name: Initialize CodeQL
         uses: github/codeql-action/init@99df26d4f13ea111d4ec1a7dddef6063f76b97e9 # v4.37.0
         with:
-          languages: ${{ matrix.language }}
-
-      - name: Setup pnpm
-        uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
-        with:
-          version: 11.0.5
-
-      - name: Setup Node.js
-        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
-        with:
-          node-version-file: .node-version
-          cache: pnpm
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Build
-        run: pnpm build
-
+          languages: javascript-typescript
+          build-mode: none
       - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@99df26d4f13ea111d4ec1a7dddef6063f76b97e9 # v4.37.0
         continue-on-error: true
